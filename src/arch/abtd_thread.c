@@ -106,10 +106,14 @@ static inline void ABTD_thread_terminate(ABTI_thread *p_thread)
     /* No other ULT is waiting or blocked for this ULT. Since fcontext does
      * not switch to other fcontext when it finishes, we need to explicitly
      * switch to the scheduler. */
-    ABTD_thread_context *p_sched_ctx;
-    p_sched_ctx = ABTI_xstream_get_sched_ctx(p_thread->p_last_xstream);
+    ABTI_sched *p_sched = p_thread->is_sched == NULL
+        /* Switch to the top scheduler */
+        ? ABTI_xstream_get_top_sched(p_thread->p_last_xstream)
+        /* Switch to the parent scheduler */
+        : ABTI_xstream_get_parent_sched(p_thread->p_last_xstream);
+    ABTD_thread_context *p_sched_ctx = p_sched->p_ctx;
     ABTI_LOG_SET_SCHED((p_sched_ctx == p_fctx->p_link)
-                       ? ABTI_xstream_get_top_sched(p_thread->p_last_xstream)
+                       ? p_sched
                        : NULL);
     ABTD_thread_finish_context(p_fctx, p_sched_ctx);
 #else

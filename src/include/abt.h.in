@@ -15,6 +15,7 @@ extern "C" {
 
 #include <stddef.h>
 #include <stdint.h>
+#include <sys/time.h>
 
 /* ABT_VERSION is the version string. ABT_NUMVERSION is the
  * numeric version that can be used in numeric comparisons.
@@ -90,15 +91,16 @@ extern "C" {
 #define ABT_ERR_MUTEX              35  /* Mutex-related error */
 #define ABT_ERR_MUTEX_LOCKED       36  /* Return value when mutex is locked */
 #define ABT_ERR_COND               37  /* Condition-related error */
-#define ABT_ERR_EVENTUAL           38  /* Eventual-related error */
-#define ABT_ERR_FUTURE             39  /* Future-related error */
-#define ABT_ERR_BARRIER            40  /* Barrier-related error */
-#define ABT_ERR_TIMER              41  /* Timer-related error */
-#define ABT_ERR_EVENT              42  /* Event-related error */
-#define ABT_ERR_MIGRATION_TARGET   43  /* Migration target error */
-#define ABT_ERR_MIGRATION_NA       44  /* Migration not available */
-#define ABT_ERR_MISSING_JOIN       45  /* An ES or more did not join */
-#define ABT_ERR_FEATURE_NA         46  /* Feature not available */
+#define ABT_ERR_COND_TIMEDOUT      38  /* Condition-related error */
+#define ABT_ERR_EVENTUAL           39  /* Eventual-related error */
+#define ABT_ERR_FUTURE             40  /* Future-related error */
+#define ABT_ERR_BARRIER            41  /* Barrier-related error */
+#define ABT_ERR_TIMER              42  /* Timer-related error */
+#define ABT_ERR_EVENT              43  /* Event-related error */
+#define ABT_ERR_MIGRATION_TARGET   44  /* Migration target error */
+#define ABT_ERR_MIGRATION_NA       45  /* Migration not available */
+#define ABT_ERR_MISSING_JOIN       46  /* An ES or more did not join */
+#define ABT_ERR_FEATURE_NA         47  /* Feature not available */
 
 
 /* Constants */
@@ -409,6 +411,7 @@ int ABT_thread_join(ABT_thread thread);
 int ABT_thread_exit(void);
 int ABT_thread_cancel(ABT_thread thread);
 int ABT_thread_self(ABT_thread *thread);
+int ABT_thread_self_id(ABT_thread_id *id);
 int ABT_thread_get_state(ABT_thread thread, ABT_thread_state *state);
 int ABT_thread_get_last_pool(ABT_thread thread, ABT_pool *pool);
 int ABT_thread_get_last_pool_id(ABT_thread thread, int *id);
@@ -456,6 +459,7 @@ int ABT_task_free(ABT_task *task);
 int ABT_task_join(ABT_task task);
 int ABT_task_cancel(ABT_task task);
 int ABT_task_self(ABT_task *task);
+int ABT_task_self_id(uint64_t *id);
 int ABT_task_get_xstream(ABT_task task, ABT_xstream *xstream);
 int ABT_task_get_state(ABT_task task, ABT_task_state *state);
 int ABT_task_get_last_pool(ABT_task task, ABT_pool *pool);
@@ -497,6 +501,8 @@ int ABT_mutex_equal(ABT_mutex mutex1, ABT_mutex mutex2, ABT_bool *result);
 int ABT_cond_create(ABT_cond *newcond);
 int ABT_cond_free(ABT_cond *cond);
 int ABT_cond_wait(ABT_cond cond, ABT_mutex mutex);
+int ABT_cond_timedwait(ABT_cond cond, ABT_mutex mutex,
+                       const struct timespec *abstime);
 int ABT_cond_signal(ABT_cond cond);
 int ABT_cond_broadcast(ABT_cond cond);
 

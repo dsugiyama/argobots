@@ -1175,6 +1175,7 @@ int ABTI_xstream_check_events(ABTI_xstream *p_xstream, ABT_sched sched)
         ABTI_CHECK_ERROR(abt_errno);
     }
 #endif
+    ABTI_EVENT_PUBLISH_INFO();
 
   fn_exit:
     return abt_errno;
@@ -1794,7 +1795,8 @@ int ABTI_xstream_set_main_sched(ABTI_xstream *p_xstream, ABTI_sched *p_sched)
     goto fn_exit;
 }
 
-void ABTI_xstream_print(ABTI_xstream *p_xstream, FILE *p_os, int indent)
+void ABTI_xstream_print(ABTI_xstream *p_xstream, FILE *p_os, int indent,
+                        ABT_bool print_sub)
 {
     char *prefix = ABTU_get_indent_str(indent);
 
@@ -1821,7 +1823,7 @@ void ABTI_xstream_print(ABTI_xstream *p_xstream, FILE *p_os, int indent)
         default:                           state = "UNKNOWN"; break;
     }
 
-    size = sizeof(char) * (p_xstream->num_scheds * 12 + 1);
+    size = sizeof(char) * (p_xstream->num_scheds * 20 + 4);
     scheds_str = (char *)ABTU_calloc(size, 1);
     scheds_str[0] = '[';
     scheds_str[1] = ' ';
@@ -1854,7 +1856,10 @@ void ABTI_xstream_print(ABTI_xstream *p_xstream, FILE *p_os, int indent)
     );
     ABTU_free(scheds_str);
 
-    ABTI_sched_print(p_xstream->p_main_sched, p_os, indent + ABTI_INDENT);
+    if (print_sub == ABT_TRUE) {
+        ABTI_sched_print(p_xstream->p_main_sched, p_os, indent + ABTI_INDENT,
+                         ABT_TRUE);
+    }
 
   fn_exit:
     fflush(p_os);

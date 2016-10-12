@@ -5,6 +5,7 @@
 
 #include "abti.h"
 
+static inline ABT_bool ABTI_thread_is_ready(ABTI_thread *p_thread);
 static inline ABT_thread_id ABTI_thread_get_new_id(void);
 
 
@@ -46,24 +47,8 @@ int ABT_thread_create(ABT_pool pool, void(*thread_func)(void *),
     ABTI_pool *p_pool = ABTI_pool_get_ptr(pool);
     ABTI_CHECK_NULL_POOL_PTR(p_pool);
 
-    p_newthread = (ABTI_thread *)ABTU_malloc(sizeof(ABTI_thread));
-
-    /* Create a stack and set attributes */
-    if (attr == ABT_THREAD_ATTR_NULL) {
-        stacksize = ABTI_global_get_thread_stacksize();
-        void *p_stack = ABTU_malloc(stacksize);
-        ABTI_thread_attr *p_myattr = &p_newthread->attr;
-        ABTI_thread_attr_init(p_myattr, p_stack, stacksize, ABT_TRUE);
-    } else {
-        ABTI_thread_attr *p_attr = ABTI_thread_attr_get_ptr(attr);
-        ABTI_thread_attr_copy(&p_newthread->attr, p_attr);
-        stacksize = p_newthread->attr.stacksize;
-        if (p_newthread->attr.p_stack == NULL) {
-            ABTI_CHECK_TRUE(p_newthread->attr.userstack == ABT_FALSE,
-                            ABT_ERR_INV_THREAD_ATTR);
-            p_newthread->attr.p_stack = ABTU_malloc(stacksize);
-        }
-    }
+    /* Allocate a ULT object and its stack */
+    p_newthread = ABTI_mem_alloc_thread(attr, &stacksize);
 
     /* Create a thread context */
     abt_errno = ABTD_thread_context_create(NULL,
@@ -271,7 +256,6 @@ int ABT_thread_free(ABT_thread *thread)
 {
     int abt_errno = ABT_SUCCESS;
     ABT_thread h_thread = *thread;
-    if (h_thread == ABT_THREAD_NULL) goto fn_exit;
 
     ABTI_thread *p_thread = ABTI_thread_get_ptr(h_thread);
     ABTI_CHECK_NULL_THREAD_PTR(p_thread);
@@ -320,19 +304,21 @@ int ABT_thread_free(ABT_thread *thread)
 int ABT_thread_join(ABT_thread thread)
 {
     int abt_errno = ABT_SUCCESS;
-    ABT_unit_type type;
     ABTI_thread *p_thread = ABTI_thread_get_ptr(thread);
     ABTI_CHECK_NULL_THREAD_PTR(p_thread);
 
-    if (p_thread->state == ABT_THREAD_STATE_TERMINATED) goto fn_exit;
+    if (p_thread->state == ABT_THREAD_STATE_TERMINATED) return abt_errno;
 
     ABTI_CHECK_TRUE_MSG(p_thread->type != ABTI_THREAD_TYPE_MAIN &&
                           p_thread->type != ABTI_THREAD_TYPE_MAIN_SCHED,
                         ABT_ERR_INV_THREAD,
                         "The main ULT cannot be joined.");
 
+#ifndef ABT_CONFIG_DISABLE_EXT_THREAD
+    ABT_unit_type type;
     ABT_self_get_type(&type);
     if (type != ABT_UNIT_TYPE_THREAD) goto yield_based;
+#endif
 
     ABTI_CHECK_TRUE_MSG(p_thread != ABTI_local_get_thread(), ABT_ERR_INV_THREAD,
                         "The target ULT should be different.");
@@ -419,7 +405,7 @@ int ABT_thread_join(ABT_thread thread)
         LOG_EVENT("[U%" PRIu64 ":E%" PRIu64 "] resume after join\n",
                   ABTI_thread_get_id(p_self), p_self->p_last_xstream->rank);
         ABTI_local_set_thread(p_self);
-        goto fn_exit;
+        return abt_errno;
     }
 
   yield_based:
@@ -533,19 +519,21 @@ int ABT_thread_self(ABT_thread *thread)
 {
     int abt_errno = ABT_SUCCESS;
 
+#ifndef ABT_CONFIG_DISABLE_EXT_THREAD
     /* In case that Argobots has not been initialized or this routine is called
      * by an external thread, e.g., pthread, return an error code instead of
      * making the call fail. */
     if (gp_ABTI_global == NULL) {
         abt_errno = ABT_ERR_UNINITIALIZED;
         *thread = ABT_THREAD_NULL;
-        goto fn_exit;
+        return abt_errno;
     }
     if (lp_ABTI_local == NULL) {
         abt_errno = ABT_ERR_INV_XSTREAM;
         *thread = ABT_THREAD_NULL;
-        goto fn_exit;
+        return abt_errno;
     }
+#endif
 
     ABTI_thread *p_thread = ABTI_local_get_thread();
     if (p_thread != NULL) {
@@ -555,7 +543,6 @@ int ABT_thread_self(ABT_thread *thread)
         *thread = ABT_THREAD_NULL;
     }
 
-  fn_exit:
     return abt_errno;
 }
 
@@ -576,17 +563,19 @@ int ABT_thread_self_id(ABT_thread_id *id)
 {
     int abt_errno = ABT_SUCCESS;
 
+#ifndef ABT_CONFIG_DISABLE_EXT_THREAD
     /* In case that Argobots has not been initialized or this routine is called
      * by an external thread, e.g., pthread, return an error code instead of
      * making the call fail. */
     if (gp_ABTI_global == NULL) {
         abt_errno = ABT_ERR_UNINITIALIZED;
-        goto fn_exit;
+        return abt_errno;
     }
     if (lp_ABTI_local == NULL) {
         abt_errno = ABT_ERR_INV_XSTREAM;
-        goto fn_exit;
+        return abt_errno;
     }
+#endif
 
     ABTI_thread *p_thread = ABTI_local_get_thread();
     if (p_thread != NULL) {
@@ -595,7 +584,6 @@ int ABT_thread_self_id(ABT_thread_id *id)
         abt_errno = ABT_ERR_INV_THREAD;
     }
 
-  fn_exit:
     return abt_errno;
 }
 
@@ -690,6 +678,42 @@ int ABT_thread_get_last_pool_id(ABT_thread thread, int *id)
 
 /**
  * @ingroup ULT
+ * @brief   Set the associated pool for the target ULT.
+ *
+ * \c ABT_thread_set_associated_pool() changes the associated pool of the target
+ * ULT \c thread to \c pool.  This routine must be called after \c thread is
+ * popped from its original associated pool (i.e., \c thread must not be inside
+ * any pool), which is the pool where \c thread was residing in.
+ *
+ * NOTE: \c ABT_thread_migrate_to_pool() can be used to change the associated
+ * pool of \c thread regardless of its location.
+ *
+ * @param[in] thread  handle to the target ULT
+ * @param[in] pool    handle to the pool
+ * @return Error code
+ * @retval ABT_SUCCESS on success
+ */
+int ABT_thread_set_associated_pool(ABT_thread thread, ABT_pool pool)
+{
+    int abt_errno = ABT_SUCCESS;
+
+    ABTI_thread *p_thread = ABTI_thread_get_ptr(thread);
+    ABTI_CHECK_NULL_THREAD_PTR(p_thread);
+    ABTI_pool *p_pool = ABTI_pool_get_ptr(pool);
+    ABTI_CHECK_NULL_POOL_PTR(p_pool);
+
+    p_thread->p_pool = p_pool;
+
+  fn_exit:
+    return abt_errno;
+
+  fn_fail:
+    HANDLE_ERROR_FUNC_WITH_CODE(abt_errno);
+    goto fn_exit;
+}
+
+/**
+ * @ingroup ULT
  * @brief   Yield the processor from the current running thread to the
  *          specific thread.
  *
@@ -705,11 +729,15 @@ int ABT_thread_yield_to(ABT_thread thread)
     int abt_errno = ABT_SUCCESS;
     ABTI_thread *p_cur_thread = NULL;
 
+#ifdef ABT_CONFIG_DISABLE_EXT_THREAD
+    p_cur_thread = ABTI_local_get_thread();
+#else
     /* If this routine is called by non-ULT, just return. */
     if (lp_ABTI_local != NULL) {
         p_cur_thread = ABTI_local_get_thread();
     }
     if (p_cur_thread == NULL) goto fn_exit;
+#endif
 
     ABTI_xstream *p_xstream = ABTI_local_get_xstream();
     ABTI_thread *p_tar_thread = ABTI_thread_get_ptr(thread);
@@ -719,9 +747,9 @@ int ABT_thread_yield_to(ABT_thread thread)
               p_cur_thread->p_last_xstream->rank,
               ABTI_thread_get_id(p_tar_thread));
 
-    /* If the target thread is the same as the running thread, just keep
-     * its execution. */
-    if (p_cur_thread == p_tar_thread) goto fn_exit;
+    /* The target ULT must be different from the caller ULT. */
+    ABTI_CHECK_TRUE_MSG(p_cur_thread != p_tar_thread, ABT_ERR_INV_THREAD,
+                        "The caller and target ULTs are the same.");
 
     ABTI_CHECK_TRUE_MSG(p_tar_thread->state != ABT_THREAD_STATE_TERMINATED,
                         ABT_ERR_INV_THREAD,
@@ -796,11 +824,15 @@ int ABT_thread_yield(void)
     ABTI_thread *p_thread = NULL;
     ABTI_sched *p_sched;
 
+#ifdef ABT_CONFIG_DISABLE_EXT_THREAD
+    p_thread = ABTI_local_get_thread();
+#else
     /* If this routine is called by non-ULT, just return. */
     if (lp_ABTI_local != NULL) {
         p_thread = ABTI_local_get_thread();
     }
     if (p_thread == NULL) goto fn_exit;
+#endif
 
     ABTI_CHECK_TRUE(p_thread->p_last_xstream == ABTI_local_get_xstream(),
                     ABT_ERR_THREAD);
@@ -1404,11 +1436,39 @@ int ABT_thread_get_id(ABT_thread thread, ABT_thread_id *thread_id)
 
 /**
  * @ingroup ULT
+ * @brief   Set the argument for the ULT function
+ *
+ * \c ABT_thread_set_arg() sets the argument for the ULT function.
+ *
+ * @param[in] thread  handle to the target ULT
+ * @param[in] arg     argument for the ULT function
+ * @return Error code
+ * @retval ABT_SUCCESS on success
+ */
+int ABT_thread_set_arg(ABT_thread thread, void *arg)
+{
+    int abt_errno = ABT_SUCCESS;
+
+    ABTI_thread *p_thread = ABTI_thread_get_ptr(thread);
+    ABTI_CHECK_NULL_THREAD_PTR(p_thread);
+
+    ABTD_thread_context_set_arg(&p_thread->ctx, arg);
+
+  fn_exit:
+    return abt_errno;
+
+  fn_fail:
+    HANDLE_ERROR_FUNC_WITH_CODE(abt_errno);
+    goto fn_exit;
+}
+
+/**
+ * @ingroup ULT
  * @brief   Retrieve the argument for the ULT function
  *
  * \c ABT_thread_get_arg() returns the argument for the ULT function, which was
- * passed to \c ABT_thread_create() when the target ULT \c thread was created.
- * If \c thread is the primary ULT, \c NULL will be returned to \c arg.
+ * passed to \c ABT_thread_create() when the target ULT \c thread was created
+ * or was set by \c ABT_thread_set_arg().
  *
  * @param[in]  thread  handle to the target ULT
  * @param[out] arg     argument for the ULT function
@@ -1422,11 +1482,7 @@ int ABT_thread_get_arg(ABT_thread thread, void **arg)
     ABTI_thread *p_thread = ABTI_thread_get_ptr(thread);
     ABTI_CHECK_NULL_THREAD_PTR(p_thread);
 
-    if (p_thread->type != ABTI_THREAD_TYPE_USER) {
-        *arg = NULL;
-    } else {
-        *arg = ABTD_thread_context_get_arg(&p_thread->ctx);
-    }
+    *arg = ABTD_thread_context_get_arg(&p_thread->ctx);
 
   fn_exit:
     return abt_errno;
@@ -1526,12 +1582,8 @@ int ABTI_thread_create_main(ABTI_xstream *p_xstream, ABTI_thread **p_thread)
     /* Get the first pool of ES */
     p_pool = ABTI_pool_get_ptr(p_xstream->p_main_sched->pools[0]);
 
-    p_newthread = (ABTI_thread *)ABTU_malloc(sizeof(ABTI_thread));
-
-    /* Set attributes */
-    /* TODO: Need to set the actual stack address and size for the main ULT */
-    ABTI_thread_attr *p_attr = &p_newthread->attr;
-    ABTI_thread_attr_init(p_attr, NULL, 0, ABT_FALSE);
+    /* Allocate a ULT object */
+    p_newthread = ABTI_mem_alloc_main_thread(ABT_THREAD_ATTR_NULL);
 
     /* Create a context */
     abt_errno = ABTD_thread_context_create(NULL, NULL, NULL, 0, NULL,
@@ -1593,30 +1645,24 @@ int ABTI_thread_create_main_sched(ABTI_xstream *p_xstream, ABTI_sched *p_sched)
     int abt_errno = ABT_SUCCESS;
     ABTI_thread *p_newthread;
 
-    p_newthread = (ABTI_thread *)ABTU_malloc(sizeof(ABTI_thread));
-
     /* Create a ULT context */
-    ABTI_thread_attr *p_attr = &p_newthread->attr;
     if (p_xstream->type == ABTI_XSTREAM_TYPE_PRIMARY) {
-        /* Create a stack for this ULT */
+        /* Create a ULT object and its stack */
         size_t stacksize = ABTI_global_get_sched_stacksize();
-        void *p_stack = ABTU_malloc(stacksize);
-        ABTI_VALGRIND_STACK_REGISTER(p_stack, stacksize);
-
-        /* Set attributes */
-        ABTI_thread_attr_init(p_attr, p_stack, stacksize, ABT_FALSE);
+        p_newthread = ABTI_mem_alloc_thread_with_stacksize(&stacksize);
+        ABTI_VALGRIND_STACK_REGISTER(p_newthread->attr.p_stack, stacksize);
 
         /* When the main scheduler is terminated, the control will jump to the
          * primary ULT. */
         ABTI_thread *p_main_thread = ABTI_global_get_main();
         abt_errno = ABTD_thread_context_create(&p_main_thread->ctx,
                 ABTI_xstream_schedule, (void *)p_xstream,
-                stacksize, p_stack, &p_newthread->ctx);
+                stacksize, p_newthread->attr.p_stack, &p_newthread->ctx);
         ABTI_CHECK_ERROR(abt_errno);
     } else {
         /* For secondary ESs, the stack of OS thread is used for the main
          * scheduler's ULT. */
-        ABTI_thread_attr_init(p_attr, NULL, 0, ABT_FALSE);
+        p_newthread = ABTI_mem_alloc_main_thread(ABT_THREAD_ATTR_NULL);
         abt_errno = ABTD_thread_context_create(NULL, NULL, NULL, 0, NULL,
                                                &p_newthread->ctx);
         ABTI_CHECK_ERROR(abt_errno);
@@ -1660,6 +1706,7 @@ int ABTI_thread_create_sched(ABTI_pool *p_pool, ABTI_sched *p_sched)
     int abt_errno = ABT_SUCCESS;
     ABTI_thread *p_newthread;
     ABT_thread h_newthread;
+    size_t stacksize;
 
     /* If p_sched is reused, ABT_thread_revive() can be used. */
     if (p_sched->p_thread) {
@@ -1672,18 +1719,14 @@ int ABTI_thread_create_sched(ABTI_pool *p_pool, ABTI_sched *p_sched)
         goto fn_exit;
     }
 
-    p_newthread = (ABTI_thread *)ABTU_malloc(sizeof(ABTI_thread));
-
-    /* Create a stack and set attributes */
-    size_t stacksize = ABTI_global_get_sched_stacksize();
-    void *p_stack = ABTU_malloc(stacksize);
-    ABTI_thread_attr *p_attr = &p_newthread->attr;
-    ABTI_thread_attr_init(p_attr, p_stack, stacksize, ABT_FALSE);
+    /* Allocate a ULT object and its stack */
+    stacksize = ABTI_global_get_sched_stacksize();
+    p_newthread = ABTI_mem_alloc_thread_with_stacksize(&stacksize);
 
     /* Create a ULT context */
     abt_errno = ABTD_thread_context_create(NULL,
             p_sched->run, (void *)ABTI_sched_get_handle(p_sched),
-            stacksize, p_stack, &p_newthread->ctx);
+            stacksize, p_newthread->attr.p_stack, &p_newthread->ctx);
     ABTI_CHECK_ERROR(abt_errno);
 
     p_newthread->state          = ABT_THREAD_STATE_READY;
@@ -1733,10 +1776,12 @@ int ABTI_thread_create_sched(ABTI_pool *p_pool, ABTI_sched *p_sched)
 
 void ABTI_thread_free(ABTI_thread *p_thread)
 {
+#ifndef ABT_CONFIG_DISABLE_MIGRATION
     /* Mutex of p_thread may have been locked somewhere. We free p_thread when
        mutex can be locked here. Since p_thread and its mutex will be freed,
        we don't need to unlock the mutex. */
     ABTI_mutex_spinlock(&p_thread->mutex);
+#endif
 
     LOG_EVENT("[U%" PRIu64 ":E%" PRIu64 "] freed\n",
               ABTI_thread_get_id(p_thread), p_thread->p_last_xstream->rank);
@@ -1744,10 +1789,7 @@ void ABTI_thread_free(ABTI_thread *p_thread)
     /* Free the unit */
     p_thread->p_pool->u_free(&p_thread->unit);
 
-    /* Free the stack and the context */
-    if (p_thread->attr.userstack == ABT_FALSE) {
-        ABTU_free(p_thread->attr.p_stack);
-    }
+    /* Free the context */
     ABTD_thread_context_free(&p_thread->ctx);
 
     /* Free the key-value table */
@@ -1755,7 +1797,8 @@ void ABTI_thread_free(ABTI_thread *p_thread)
         ABTI_ktable_free(p_thread->p_keytable);
     }
 
-    ABTU_free(p_thread);
+    /* Free ABTI_thread (stack will also be freed) */
+    ABTI_mem_free_thread(p_thread);
 }
 
 void ABTI_thread_free_main(ABTI_thread *p_thread)
@@ -1768,7 +1811,7 @@ void ABTI_thread_free_main(ABTI_thread *p_thread)
         ABTI_ktable_free(p_thread->p_keytable);
     }
 
-    ABTU_free(p_thread);
+    ABTI_mem_free_thread(p_thread);
 }
 
 void ABTI_thread_free_main_sched(ABTI_thread *p_thread)
@@ -1776,8 +1819,7 @@ void ABTI_thread_free_main_sched(ABTI_thread *p_thread)
     LOG_EVENT("[U%" PRIu64 ":E%" PRIu64 "] main sched ULT freed\n",
               ABTI_thread_get_id(p_thread), p_thread->p_last_xstream->rank);
 
-    /* Free the stack and the context */
-    if (p_thread->attr.p_stack) ABTU_free(p_thread->attr.p_stack);
+    /* Free the context */
     ABTD_thread_context_free(&p_thread->ctx);
 
     /* Free the key-value table */
@@ -1785,7 +1827,7 @@ void ABTI_thread_free_main_sched(ABTI_thread *p_thread)
         ABTI_ktable_free(p_thread->p_keytable);
     }
 
-    ABTU_free(p_thread);
+    ABTI_mem_free_thread(p_thread);
 }
 
 int ABTI_thread_set_blocked(ABTI_thread *p_thread)
@@ -1865,7 +1907,7 @@ int ABTI_thread_set_ready(ABTI_thread *p_thread)
     goto fn_exit;
 }
 
-ABT_bool ABTI_thread_is_ready(ABTI_thread *p_thread)
+static inline ABT_bool ABTI_thread_is_ready(ABTI_thread *p_thread)
 {
     /* ULT can be regarded as 'ready' only if its state is READY and it has been
      * pushed into a pool. Since we set ULT's state to READY and then push it

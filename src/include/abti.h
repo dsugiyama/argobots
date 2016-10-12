@@ -71,6 +71,10 @@ enum ABTI_thread_type {
     ABTI_THREAD_TYPE_USER
 };
 
+enum ABTI_mutex_attr_val {
+    ABTI_MUTEX_ATTR_NONE = 0,
+    ABTI_MUTEX_ATTR_RECURSIVE = 1 << 0
+};
 
 /* Macro functions */
 #define ABTI_UNUSED(a)              (void)(a)
@@ -101,12 +105,19 @@ typedef struct ABTI_task            ABTI_task;
 typedef struct ABTI_key             ABTI_key;
 typedef struct ABTI_ktelem          ABTI_ktelem;
 typedef struct ABTI_ktable          ABTI_ktable;
+typedef struct ABTI_mutex_attr      ABTI_mutex_attr;
 typedef struct ABTI_mutex           ABTI_mutex;
 typedef struct ABTI_cond            ABTI_cond;
+typedef struct ABTI_rwlock          ABTI_rwlock;
 typedef struct ABTI_eventual        ABTI_eventual;
 typedef struct ABTI_future          ABTI_future;
 typedef struct ABTI_barrier         ABTI_barrier;
 typedef struct ABTI_timer           ABTI_timer;
+#ifdef ABT_CONFIG_USE_MEM_POOL
+typedef struct ABTI_stack_header    ABTI_stack_header;
+typedef struct ABTI_page_header     ABTI_page_header;
+typedef struct ABTI_sp_header       ABTI_sp_header;
+#endif
 
 
 /* Architecture-Dependent Definitions */
@@ -114,8 +125,15 @@ typedef struct ABTI_timer           ABTI_timer;
 
 
 /* Definitions */
+struct ABTI_mutex_attr {
+    uint32_t attrs;             /* bit-or'ed attributes */
+    uint32_t nesting_cnt;       /* nesting count */
+    ABTI_unit *p_owner;         /* owner work unit */
+};
+
 struct ABTI_mutex {
-    uint32_t val;
+    uint32_t val;               /* 0: unlocked, 1: locked */
+    ABTI_mutex_attr attr;       /* attributes */
 };
 
 struct ABTI_global {
@@ -125,7 +143,7 @@ struct ABTI_global {
     ABTI_mutex mutex;           /* Mutex */
 
     int num_cores;              /* Number of CPU cores */
-    int set_affinity;           /* Whether CPU affinity is used */
+    ABT_bool set_affinity;      /* Whether CPU affinity is used */
     ABT_bool use_logging;       /* Whether logging is used */
     ABT_bool use_debug;         /* Whether debug output is used */
     int key_table_size;         /* Default key table size */
@@ -133,13 +151,45 @@ struct ABTI_global {
     size_t sched_stacksize;     /* Default stack size for sched (in bytes) */
     uint32_t sched_event_freq;  /* Default check frequency for sched */
     ABTI_thread *p_thread_main; /* ULT of the main function */
+
+    uint32_t cache_line_size;          /* Cache line size */
+    uint32_t os_page_size;             /* OS page size */
+    uint32_t huge_page_size;           /* Huge page size */
+#ifdef ABT_CONFIG_USE_MEM_POOL
+    uint32_t mem_page_size;            /* Page size for memory allocation */
+    uint32_t mem_sp_size;              /* Stack page size */
+    uint32_t mem_max_stacks;           /* Max. # of stacks kept in each ES */
+    int mem_lp_alloc;                  /* How to allocate large pages */
+    uint32_t mem_sh_size;              /* Stack header (including ABTI_thread
+                                          ABTI_stack_header) size */
+    ABTI_stack_header *p_mem_stack;    /* List of ULT stack */
+    ABTI_page_header *p_mem_task;      /* List of task block pages */
+    ABTI_sp_header *p_mem_sph;         /* List of stack pages */
+#endif
+
     ABT_bool pm_connected;      /* Is power mgmt. daemon connected? */
+    char *pm_host;              /* Hostname for power mgmt. daemon */
+    int pm_port;                /* Port number for power mgmt. daemon */
+#ifdef ABT_CONFIG_PUBLISH_INFO
+    ABT_bool pub_needed;        /* Is info. publishing needed? */
+    char *pub_filename;         /* Filename for publishing */
+    double pub_interval;        /* Time interval in seconds */
+#endif
+
+    ABT_bool print_config;      /* Whether to print config on ABT_init */
 };
 
 struct ABTI_local {
     ABTI_xstream *p_xstream;    /* Current ES */
     ABTI_thread *p_thread;      /* Current running ULT */
     ABTI_task *p_task;          /* Current running tasklet */
+
+#ifdef ABT_CONFIG_USE_MEM_POOL
+    uint32_t num_stacks;                /* Current # of stacks */
+    ABTI_stack_header *p_mem_stack;     /* Free stack list */
+    ABTI_page_header *p_mem_task_head;  /* Head of page list */
+    ABTI_page_header *p_mem_task_tail;  /* Tail of page list */
+#endif
 };
 
 struct ABTI_contn {
@@ -345,12 +395,20 @@ struct ABTI_cond {
     ABTI_unit *p_tail;          /* Tail of waiters */
 };
 
+struct ABTI_rwlock {
+    ABTI_mutex mutex;
+    ABTI_cond  cond;
+    size_t reader_count;
+    int write_flag;
+};
+
 struct ABTI_eventual {
     ABTI_mutex mutex;
     ABT_bool ready;
     void *value;
     int nbytes;
-    ABTI_thread_list waiters;
+    ABTI_unit *p_head;          /* Head of waiters */
+    ABTI_unit *p_tail;          /* Tail of waiters */
 };
 
 struct ABTI_future {
@@ -360,7 +418,8 @@ struct ABTI_future {
     uint32_t compartments;
     void **array;
     void (*p_callback)(void **arg);
-    ABTI_thread_list waiters;
+    ABTI_unit *p_head;          /* Head of waiters */
+    ABTI_unit *p_tail;          /* Tail of waiters */
 };
 
 struct ABTI_barrier {
@@ -429,11 +488,13 @@ int ABTI_xstream_check_events(ABTI_xstream *p_xstream, ABT_sched sched);
 void *ABTI_xstream_launch_main_sched(void *p_arg);
 void ABTI_xstream_reset_rank(void);
 void ABTI_xstream_free_ranks(void);
-void ABTI_xstream_print(ABTI_xstream *p_xstream, FILE *p_os, int indent);
+void ABTI_xstream_print(ABTI_xstream *p_xstream, FILE *p_os, int indent,
+                        ABT_bool print_sub);
 
 /* Scheduler */
 ABT_sched_def *ABTI_sched_get_basic_def(void);
 ABT_sched_def *ABTI_sched_get_prio_def(void);
+ABT_sched_def *ABTI_sched_get_randws_def(void);
 int ABTI_sched_free(ABTI_sched *p_sched);
 int ABTI_sched_get_migration_pool(ABTI_sched *, ABTI_pool *, ABTI_pool **);
 ABTI_sched_kind ABTI_sched_get_kind(ABT_sched_def *def);
@@ -441,7 +502,8 @@ ABT_bool ABTI_sched_has_to_stop(ABTI_sched *p_sched, ABTI_xstream *p_xstream);
 size_t ABTI_sched_get_size(ABTI_sched *p_sched);
 size_t ABTI_sched_get_total_size(ABTI_sched *p_sched);
 size_t ABTI_sched_get_effective_size(ABTI_sched *p_sched);
-void ABTI_sched_print(ABTI_sched *p_sched, FILE *p_os, int indent);
+void ABTI_sched_print(ABTI_sched *p_sched, FILE *p_os, int indent,
+                      ABT_bool print_sub);
 void ABTI_sched_reset_id(void);
 
 /* Scheduler config */
@@ -474,7 +536,6 @@ void  ABTI_thread_free_main_sched(ABTI_thread *p_thread);
 int   ABTI_thread_set_blocked(ABTI_thread *p_thread);
 void  ABTI_thread_suspend(ABTI_thread *p_thread);
 int   ABTI_thread_set_ready(ABTI_thread *p_thread);
-ABT_bool ABTI_thread_is_ready(ABTI_thread *p_thread);
 void  ABTI_thread_print(ABTI_thread *p_thread, FILE *p_os, int indent);
 #ifndef ABT_CONFIG_DISABLE_MIGRATION
 void  ABTI_thread_add_req_arg(ABTI_thread *p_thread, uint32_t req, void *arg);
@@ -503,11 +564,9 @@ uint64_t ABTI_task_get_id(ABTI_task *p_task);
 ABTI_ktable *ABTI_ktable_alloc(int size);
 void ABTI_ktable_free(ABTI_ktable *p_ktable);
 
-/* Eventual */
-void ABTI_eventual_signal(ABTI_eventual *p_eventual);
-
-/* Future */
-void ABTI_future_signal(ABTI_future *p_future);
+/* Mutex Attributes */
+void ABTI_mutex_attr_print(ABTI_mutex_attr *p_attr, FILE *p_os, int indent);
+void ABTI_mutex_attr_get_str(ABTI_mutex_attr *p_attr, char *p_buf);
 
 /* Event */
 void ABTI_event_init(void);
@@ -517,23 +576,32 @@ void ABTI_event_connect_power(char *p_host, int port);
 void ABTI_event_disconnect_power(void);
 ABT_bool ABTI_event_check_power(void);
 #endif
+#ifdef ABT_CONFIG_PUBLISH_INFO
+void ABTI_event_inc_unit_cnt(ABTI_xstream *p_xstream, ABT_unit_type type);
+void ABTI_event_publish_info(void);
+#endif
 
 #include "abti_log.h"
+#include "abti_event.h"
 #include "abti_local.h"
 #include "abti_global.h"
 #include "abti_sched.h"
 #include "abti_config.h"
 #include "abti_pool.h"
 #include "abti_stream.h"
+#include "abti_self.h"
 #include "abti_thread.h"
 #include "abti_thread_attr.h"
 #include "abti_task.h"
 #include "abti_key.h"
 #include "abti_mutex.h"
+#include "abti_mutex_attr.h"
 #include "abti_cond.h"
+#include "abti_rwlock.h"
 #include "abti_eventual.h"
 #include "abti_future.h"
 #include "abti_barrier.h"
 #include "abti_timer.h"
+#include "abti_mem.h"
 
 #endif /* ABTI_H_INCLUDED */

@@ -13,6 +13,11 @@
 /* Data Types */
 typedef pthread_t           ABTD_xstream_context;
 typedef pthread_mutex_t     ABTD_xstream_mutex;
+#ifdef HAVE_PTHREAD_BARRIER_INIT
+typedef pthread_barrier_t   ABTD_xstream_barrier;
+#else
+typedef void *              ABTD_xstream_barrier;
+#endif
 typedef abt_ucontext_t      ABTD_thread_context;
 
 /* ES Storage Qualifier */
@@ -36,6 +41,8 @@ int ABTD_affinity_set_cpuset(ABTD_xstream_context ctx, int cpuset_size,
                              int *p_cpuset);
 int ABTD_affinity_get_cpuset(ABTD_xstream_context ctx, int cpuset_size,
                              int *p_cpuset, int *p_num_cpus);
+
+#include "abtd_stream.h"
 
 /* ULT Context */
 #include "abtd_thread.h"

@@ -11,19 +11,25 @@ abt_sources = \
 	eventual.c \
 	futures.c \
 	global.c \
+	info.c \
 	key.c \
 	local.c \
 	log.c \
 	mutex.c \
+	mutex_attr.c \
+	rwlock.c \
 	self.c \
 	stream.c \
+	stream_barrier.c \
 	task.c \
 	thread.c \
 	thread_attr.c \
-	timer.c
+	timer.c \
+	unit.c
 
 include $(top_srcdir)/src/arch/Makefile.mk
 include $(top_srcdir)/src/container/Makefile.mk
+include $(top_srcdir)/src/mem/Makefile.mk
 include $(top_srcdir)/src/pool/Makefile.mk
 include $(top_srcdir)/src/sched/Makefile.mk
 include $(top_srcdir)/src/util/Makefile.mk

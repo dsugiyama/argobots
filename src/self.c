@@ -41,12 +41,14 @@ int ABT_self_get_type(ABT_unit_type *type)
         goto fn_exit;
     }
 
+#ifndef ABT_CONFIG_DISABLE_EXT_THREAD
     /* This is when an external thread called this routine. */
     if (lp_ABTI_local == NULL) {
         abt_errno = ABT_ERR_INV_XSTREAM;
         *type = ABT_UNIT_TYPE_EXT;
         goto fn_exit;
     }
+#endif
 
     if (ABTI_local_get_task() != NULL) {
         *type = ABT_UNIT_TYPE_TASK;
@@ -90,12 +92,14 @@ int ABT_self_is_primary(ABT_bool *flag)
         goto fn_exit;
     }
 
+#ifndef ABT_CONFIG_DISABLE_EXT_THREAD
     /* This is when an external thread called this routine. */
     if (lp_ABTI_local == NULL) {
         abt_errno = ABT_ERR_INV_XSTREAM;
         *flag = ABT_FALSE;
         goto fn_exit;
     }
+#endif
 
     p_thread = ABTI_local_get_thread();
     if (p_thread) {
@@ -137,12 +141,14 @@ int ABT_self_on_primary_xstream(ABT_bool *flag)
         goto fn_exit;
     }
 
+#ifndef ABT_CONFIG_DISABLE_EXT_THREAD
     /* This is when an external thread called this routine. */
     if (lp_ABTI_local == NULL) {
         abt_errno = ABT_ERR_INV_XSTREAM;
         *flag = ABT_FALSE;
         goto fn_exit;
     }
+#endif
 
     p_xstream = ABTI_local_get_xstream();
     ABTI_CHECK_NULL_XSTREAM_PTR(p_xstream);
@@ -190,12 +196,14 @@ int ABT_self_get_last_pool_id(int *pool_id)
         goto fn_exit;
     }
 
+#ifndef ABT_CONFIG_DISABLE_EXT_THREAD
     /* This is when an external thread called this routine. */
     if (lp_ABTI_local == NULL) {
         abt_errno = ABT_ERR_INV_XSTREAM;
         *pool_id = -1;
         goto fn_exit;
     }
+#endif
 
     if ((p_thread = ABTI_local_get_thread())) {
         ABTI_ASSERT(p_thread->p_pool);
@@ -231,12 +239,16 @@ int ABT_self_get_last_pool_id(int *pool_id)
 int ABT_self_suspend(void)
 {
     int abt_errno = ABT_SUCCESS;
+#ifdef ABT_CONFIG_DISABLE_EXT_THREAD
+    ABTI_thread *p_thread = ABTI_local_get_thread();
+#else
     ABTI_thread *p_thread = NULL;
 
     /* If this routine is called by non-ULT, just return. */
     if (lp_ABTI_local != NULL) {
         p_thread = ABTI_local_get_thread();
     }
+#endif
     if (p_thread == NULL) {
         abt_errno = ABT_ERR_INV_THREAD;
         goto fn_fail;
@@ -257,14 +269,59 @@ int ABT_self_suspend(void)
 
 /**
  * @ingroup SELF
+ * @brief   Set the argument for the work unit function
+ *
+ * \c ABT_self_set_arg() sets the argument for the caller's work unit
+ * function.
+ *
+ * @param[in] arg  argument for the work unit function
+ * @return Error code
+ * @retval ABT_SUCCESS on success
+ */
+int ABT_self_set_arg(void *arg)
+{
+    int abt_errno = ABT_SUCCESS;
+    ABTI_thread *p_thread;
+    ABTI_task *p_task;
+
+    /* When Argobots has not been initialized */
+    if (gp_ABTI_global == NULL) {
+        abt_errno = ABT_ERR_UNINITIALIZED;
+        goto fn_exit;
+    }
+
+    /* When an external thread called this routine */
+    if (lp_ABTI_local == NULL) {
+        abt_errno = ABT_ERR_INV_XSTREAM;
+        goto fn_exit;
+    }
+
+    if ((p_thread = ABTI_local_get_thread())) {
+        ABTD_thread_context_set_arg(&p_thread->ctx, arg);
+    } else if ((p_task = ABTI_local_get_task())) {
+        p_task->p_arg = arg;
+    } else {
+        abt_errno = ABT_ERR_OTHER;
+        goto fn_fail;
+    }
+
+  fn_exit:
+    return abt_errno;
+
+  fn_fail:
+    HANDLE_ERROR_FUNC_WITH_CODE(abt_errno);
+    goto fn_exit;
+}
+
+/**
+ * @ingroup SELF
  * @brief   Retrieve the argument for the work unit function
  *
  * \c ABT_self_get_arg() returns the argument for the caller's work unit
  * function.  If the caller is a ULT, this routine returns the function argument
- * passed to \c ABT_thread_create() when the caller was created.  On the other
- * hand, if the caller is a tasklet, this routine returns the function argument
- * passed to \c ABT_task_create().  If the caller is the primary ULT or an
- * external thread, \c NULL will be returned to \c arg.
+ * passed to \c ABT_thread_create() when the caller was created or set by \c
+ * ABT_thread_set_arg().  On the other hand, if the caller is a tasklet, this
+ * routine returns the function argument passed to \c ABT_task_create().
  *
  * @param[out] arg  argument for the work unit function
  * @return Error code
@@ -283,19 +340,17 @@ int ABT_self_get_arg(void **arg)
         goto fn_exit;
     }
 
+#ifndef ABT_CONFIG_DISABLE_EXT_THREAD
     /* When an external thread called this routine */
     if (lp_ABTI_local == NULL) {
         abt_errno = ABT_ERR_INV_XSTREAM;
         *arg = NULL;
         goto fn_exit;
     }
+#endif
 
     if ((p_thread = ABTI_local_get_thread())) {
-        if (p_thread->type != ABTI_THREAD_TYPE_USER) {
-            *arg = NULL;
-        } else {
-            *arg = ABTD_thread_context_get_arg(&p_thread->ctx);
-        }
+        *arg = ABTD_thread_context_get_arg(&p_thread->ctx);
     } else if ((p_task = ABTI_local_get_task())) {
         *arg = p_task->p_arg;
     } else {

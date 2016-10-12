@@ -7,22 +7,68 @@
 #include <unistd.h>
 
 #ifdef HAVE_PTHREAD_SETAFFINITY_NP
+#if defined(__FreeBSD__)
+#include <sys/param.h>
+#include <sys/cpuset.h>
+#include <pthread_np.h>
+
+typedef cpuset_t  cpu_set_t;
+
+static inline
+int ABTD_CPU_COUNT(cpu_set_t *p_cpuset)
+{
+    int i, num_cpus = 0;
+    for (i = 0; i < CPU_SETSIZE; i++) {
+        if (CPU_ISSET(i, p_cpuset)) {
+            num_cpus++;
+        }
+    }
+    return num_cpus;
+}
+
+#else
+#define _GNU_SOURCE
+#include <sched.h>
+#define ABTD_CPU_COUNT  CPU_COUNT
+#endif
+
+enum {
+    ABTI_ES_AFFINITY_CHAMELEON,
+    ABTI_ES_AFFINITY_DEFAULT
+};
+static int g_affinity_type = ABTI_ES_AFFINITY_DEFAULT;
 static cpu_set_t g_cpusets[CPU_SETSIZE];
 
 static inline cpu_set_t ABTD_affinity_get_cpuset_for_rank(int rank)
 {
-    return g_cpusets[rank % gp_ABTI_global->num_cores];
+    if (g_affinity_type == ABTI_ES_AFFINITY_CHAMELEON) {
+        int num_threads_per_socket = gp_ABTI_global->num_cores / 2;
+        int rem = rank % 2;
+        int socket_id = rank / num_threads_per_socket;
+        int target = (rank - num_threads_per_socket * socket_id - rem + socket_id)
+                   + num_threads_per_socket * rem;
+        return g_cpusets[target % gp_ABTI_global->num_cores];
+    } else {
+        return g_cpusets[rank % gp_ABTI_global->num_cores];
+    }
 }
 #endif
 
 void ABTD_affinity_init(void)
 {
 #ifdef HAVE_PTHREAD_SETAFFINITY_NP
-    cpu_set_t cpuset;
-    int i, ret;
+    int i;
     int num_cores = 0;
 
-    ret = sched_getaffinity(getpid(), sizeof(cpu_set_t), &cpuset);
+#if defined(__FreeBSD__)
+    for (i = 0; i < CPU_SETSIZE; i++) {
+        CPU_ZERO(&g_cpusets[i]);
+        CPU_SET(i, &g_cpusets[i]);
+    }
+    num_cores = CPU_SETSIZE;
+#else
+    cpu_set_t cpuset;
+    int ret = sched_getaffinity(getpid(), sizeof(cpu_set_t), &cpuset);
     ABTI_ASSERT(ret == 0);
 
     for (i = 0; i < CPU_SETSIZE; i++) {
@@ -32,9 +78,20 @@ void ABTD_affinity_init(void)
             num_cores++;
         }
     }
+#endif
     gp_ABTI_global->num_cores = num_cores;
+
+    /* affinity type */
+    char *env = getenv("ABT_AFFINITY_TYPE");
+    if (env == NULL) env = getenv("ABT_ENV_AFFINITY_TYPE");
+    if (env != NULL) {
+        if (strcmp(env, "chameleon") == 0) {
+            g_affinity_type = ABTI_ES_AFFINITY_CHAMELEON;
+        }
+    }
 #else
-    /* Nothing to do */
+    /* In this case, we don't support the ES affinity. */
+    gp_ABTI_global->set_affinity = ABT_FALSE;
 #endif
 }
 
@@ -124,7 +181,7 @@ int ABTD_affinity_get_cpuset(ABTD_xstream_context ctx, int cpuset_size,
     }
 
     if (p_num_cpus != NULL) {
-        *p_num_cpus = CPU_COUNT(&cpuset);
+        *p_num_cpus = ABTD_CPU_COUNT(&cpuset);
     }
 
   fn_exit:

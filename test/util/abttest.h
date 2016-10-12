@@ -138,8 +138,19 @@ static inline uint64_t ABT_test_get_cycles()
     uint64_t cycle = ((uint64_t)lo) | (((int64_t)hi) << 32);
     return cycle;
 }
+#elif defined(__aarch64__)
+static inline uint64_t ABT_test_get_cycles()
+{
+    register uint64_t cycle;
+    __asm__ __volatile__ ("isb; mrs %0, cntvct_el0" : "=r"(cycle));
+    return cycle;
+}
 #else
-#error "Cycle information is not supported on this platform"
+#warning "Cycle information is not supported on this platform"
+static inline uint64_t ABT_test_get_cycles()
+{
+    return 0;
+}
 #endif
 
 #endif /* ABTTEST_H_INCLUDED */

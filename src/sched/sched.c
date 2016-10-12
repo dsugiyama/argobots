@@ -5,7 +5,9 @@
 
 #include "abti.h"
 
+#ifdef ABT_CONFIG_USE_DEBUG_LOG
 static inline uint64_t ABTI_sched_get_new_id(void);
+#endif
 
 
 /** @defgroup SCHED Scheduler
@@ -176,6 +178,12 @@ int ABT_sched_create_basic(ABT_sched_predef predef, int num_pools,
                                              ABT_SCHED_CONFIG_NULL,
                                              newsched);
                 break;
+            case ABT_SCHED_RANDWS:
+                abt_errno = ABT_sched_create(ABTI_sched_get_randws_def(),
+                                             num_pools, pool_list,
+                                             ABT_SCHED_CONFIG_NULL,
+                                             newsched);
+                break;
             default:
                 abt_errno = ABT_ERR_INV_SCHED_PREDEF;
                 break;
@@ -194,6 +202,9 @@ int ABT_sched_create_basic(ABT_sched_predef predef, int num_pools,
                 break;
             case ABT_SCHED_PRIO:
                 num_pools = ABTI_SCHED_NUM_PRIO;
+                break;
+            case ABT_SCHED_RANDWS:
+                num_pools = 1;
                 break;
             default:
                 abt_errno = ABT_ERR_INV_SCHED_PREDEF;
@@ -221,6 +232,11 @@ int ABT_sched_create_basic(ABT_sched_predef predef, int num_pools,
                 break;
             case ABT_SCHED_PRIO:
                 abt_errno = ABT_sched_create(ABTI_sched_get_prio_def(),
+                                             num_pools, pool_list,
+                                             config, newsched);
+                break;
+            case ABT_SCHED_RANDWS:
+                abt_errno = ABT_sched_create(ABTI_sched_get_randws_def(),
                                              num_pools, pool_list,
                                              config, newsched);
                 break;
@@ -781,7 +797,8 @@ ABTI_sched_kind ABTI_sched_get_kind(ABT_sched_def *def)
   return (ABTI_sched_kind)def;
 }
 
-void ABTI_sched_print(ABTI_sched *p_sched, FILE *p_os, int indent)
+void ABTI_sched_print(ABTI_sched *p_sched, FILE *p_os, int indent,
+                      ABT_bool print_sub)
 {
     char *prefix = ABTU_get_indent_str(indent);
 
@@ -821,10 +838,10 @@ void ABTI_sched_print(ABTI_sched *p_sched, FILE *p_os, int indent)
         case ABTI_SCHED_NOT_USED: used = "NOT_USED"; break;
         case ABTI_SCHED_MAIN:     used = "MAIN"; break;
         case ABTI_SCHED_IN_POOL:  used = "IN_POOL"; break;
-        default:                  type = "UNKNOWN"; break;
+        default:                  used = "UNKNOWN"; break;
     }
 
-    size = sizeof(char) * (p_sched->num_pools * 12 + 1);
+    size = sizeof(char) * (p_sched->num_pools * 20 + 4);
     pools_str = (char *)ABTU_calloc(size, 1);
     pools_str[0] = '[';
     pools_str[1] = ' ';
@@ -870,9 +887,11 @@ void ABTI_sched_print(ABTI_sched *p_sched, FILE *p_os, int indent)
     );
     ABTU_free(pools_str);
 
-    for (i = 0; i < p_sched->num_pools; i++) {
-        ABTI_pool *p_pool = ABTI_pool_get_ptr(p_sched->pools[i]);
-        ABTI_pool_print(p_pool, p_os, indent + 2);
+    if (print_sub == ABT_TRUE) {
+        for (i = 0; i < p_sched->num_pools; i++) {
+            ABTI_pool *p_pool = ABTI_pool_get_ptr(p_sched->pools[i]);
+            ABTI_pool_print(p_pool, p_os, indent + 2);
+        }
     }
 
   fn_exit:
@@ -890,7 +909,9 @@ void ABTI_sched_reset_id(void)
 /* Internal static functions                                                 */
 /*****************************************************************************/
 
+#ifdef ABT_CONFIG_USE_DEBUG_LOG
 static inline uint64_t ABTI_sched_get_new_id(void)
 {
     return (uint64_t)ABTD_atomic_fetch_add_uint64(&g_sched_id, 1);
 }
+#endif

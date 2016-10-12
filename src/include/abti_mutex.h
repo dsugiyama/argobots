@@ -44,6 +44,7 @@ static inline
 void ABTI_mutex_init(ABTI_mutex *p_mutex)
 {
     p_mutex->val = 0;
+    p_mutex->attr.attrs = ABTI_MUTEX_ATTR_NONE;
 }
 
 static inline
@@ -82,6 +83,7 @@ int ABTI_mutex_trylock(ABTI_mutex *p_mutex)
 static inline
 void ABTI_mutex_unlock(ABTI_mutex *p_mutex)
 {
+    ABTD_atomic_mem_barrier();
     *(volatile uint32_t *)&p_mutex->val = 0;
 }
 

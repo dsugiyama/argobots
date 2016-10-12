@@ -45,7 +45,8 @@ int ABT_task_create(ABT_pool pool,
     ABTI_pool *p_pool = ABTI_pool_get_ptr(pool);
     ABTI_CHECK_NULL_POOL_PTR(p_pool);
 
-    p_newtask = (ABTI_task *)ABTU_malloc(sizeof(ABTI_task));
+    /* Allocate a task object */
+    p_newtask = ABTI_mem_alloc_task();
 
     p_newtask->p_xstream  = NULL;
     p_newtask->state      = ABT_TASK_STATE_READY;
@@ -112,7 +113,8 @@ int ABTI_task_create_sched(ABTI_pool *p_pool, ABTI_sched *p_sched)
         goto fn_exit;
     }
 
-    p_newtask = (ABTI_task *)ABTU_malloc(sizeof(ABTI_task));
+    /* Allocate a task object */
+    p_newtask = ABTI_mem_alloc_task();
 
     p_newtask->p_xstream  = NULL;
     p_newtask->state      = ABT_TASK_STATE_READY;
@@ -142,8 +144,6 @@ int ABTI_task_create_sched(ABTI_pool *p_pool, ABTI_sched *p_sched)
 #ifdef ABT_CONFIG_DISABLE_POOL_PRODUCER_CHECK
     /* Add this tasklet to the pool */
     ABTI_pool_push(p_pool, p_newtask->unit);
-
-    return abt_errno;
 #else
     /* Add this tasklet to the pool */
     abt_errno = ABTI_pool_push(p_pool, p_newtask->unit, ABTI_xstream_self());
@@ -152,6 +152,7 @@ int ABTI_task_create_sched(ABTI_pool *p_pool, ABTI_sched *p_sched)
         ABTI_task_free(p_newtask);
         goto fn_fail;
     }
+#endif
 
   fn_exit:
     return abt_errno;
@@ -159,7 +160,6 @@ int ABTI_task_create_sched(ABTI_pool *p_pool, ABTI_sched *p_sched)
   fn_fail:
     HANDLE_ERROR_FUNC_WITH_CODE(abt_errno);
     goto fn_exit;
-#endif
 }
 
 /**
@@ -402,19 +402,21 @@ int ABT_task_self(ABT_task *task)
 {
     int abt_errno = ABT_SUCCESS;
 
+#ifndef ABT_CONFIG_DISABLE_EXT_THREAD
     /* In case that Argobots has not been initialized or this routine is called
      * by an external thread, e.g., pthread, return an error code instead of
      * making the call fail. */
     if (gp_ABTI_global == NULL) {
         abt_errno = ABT_ERR_UNINITIALIZED;
         *task = ABT_TASK_NULL;
-        goto fn_exit;
+        return abt_errno;
     }
     if (lp_ABTI_local == NULL) {
         abt_errno = ABT_ERR_INV_XSTREAM;
         *task = ABT_TASK_NULL;
-        goto fn_exit;
+        return abt_errno;
     }
+#endif
 
     ABTI_task *p_task = ABTI_local_get_task();
     if (p_task != NULL) {
@@ -424,7 +426,6 @@ int ABT_task_self(ABT_task *task)
         *task = ABT_TASK_NULL;
     }
 
-  fn_exit:
     return abt_errno;
 }
 
@@ -445,17 +446,19 @@ int ABT_task_self_id(uint64_t *id)
 {
     int abt_errno = ABT_SUCCESS;
 
+#ifndef ABT_CONFIG_DISABLE_EXT_THREAD
     /* In case that Argobots has not been initialized or this routine is called
      * by an external thread, e.g., pthread, return an error code instead of
      * making the call fail. */
     if (gp_ABTI_global == NULL) {
         abt_errno = ABT_ERR_UNINITIALIZED;
-        goto fn_exit;
+        return abt_errno;
     }
     if (lp_ABTI_local == NULL) {
         abt_errno = ABT_ERR_INV_XSTREAM;
-        goto fn_exit;
+        return abt_errno;
     }
+#endif
 
     ABTI_task *p_task = ABTI_local_get_task();
     if (p_task != NULL) {
@@ -464,7 +467,6 @@ int ABT_task_self_id(uint64_t *id)
         abt_errno = ABT_ERR_INV_TASK;
     }
 
-  fn_exit:
     return abt_errno;
 }
 
@@ -810,7 +812,7 @@ void ABTI_task_free(ABTI_task *p_task)
         ABTI_ktable_free(p_task->p_keytable);
     }
 
-    ABTU_free(p_task);
+    ABTI_mem_free_task(p_task);
 }
 
 void ABTI_task_print(ABTI_task *p_task, FILE *p_os, int indent)

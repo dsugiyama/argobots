@@ -43,11 +43,14 @@ int ABT_init(int argc, char **argv)
 
     gp_ABTI_global = (ABTI_global *)ABTU_malloc(sizeof(ABTI_global));
 
-    /* Initialize the event environment */
-    ABTI_event_init();
-
     /* Initialize the system environment */
     ABTD_env_init(gp_ABTI_global);
+
+    /* Initialize memory pool */
+    ABTI_mem_init(gp_ABTI_global);
+
+    /* Initialize the event environment */
+    ABTI_event_init();
 
     /* Initialize rank and IDs. */
     ABTI_xstream_reset_rank();
@@ -82,6 +85,10 @@ int ABT_init(int argc, char **argv)
     /* Start the primary ES */
     abt_errno = ABTI_xstream_start_primary(p_newxstream, p_main_thread);
     ABTI_CHECK_ERROR_MSG(abt_errno, "ABTI_xstream_start_primary");
+
+    if (gp_ABTI_global->print_config == ABT_TRUE) {
+        ABT_info_print_config(stdout);
+    }
 
   fn_exit:
     return abt_errno;
@@ -173,6 +180,9 @@ int ABT_finalize(void)
 
     /* Free the ES array */
     ABTU_free(gp_ABTI_global->p_xstreams);
+
+    /* Finalize the memory pool */
+    ABTI_mem_finalize(gp_ABTI_global);
 
     /* Free the ABTI_global structure */
     ABTU_free(gp_ABTI_global);

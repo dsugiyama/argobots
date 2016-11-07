@@ -50,6 +50,9 @@ static int sched_init(ABT_sched sched, ABT_sched_config config)
     goto fn_exit;
 }
 
+// call the stealing function directly
+ABT_unit deque_pop_steal(ABTI_pool *self);
+
 static void sched_run(ABT_sched sched)
 {
     uint32_t work_count = 0;
@@ -86,9 +89,11 @@ static void sched_run(ABT_sched sched)
             p_pool = ABTI_pool_get_ptr(pool);
             size = p_pool->p_get_size(pool);
             if (size > 0) {
-                unit = p_pool->p_pop(pool);
+                unit = deque_pop_steal(p_pool);
                 LOG_EVENT_POOL_POP(p_pool, unit);
                 if (unit != ABT_UNIT_NULL) {
+                    // Change the pool which the unit belongs to.
+                    unit->pool = p_pools[0];
                     ABTI_xstream_run_unit(p_xstream, unit, p_pool);
                 }
             }

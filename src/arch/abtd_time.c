@@ -4,6 +4,7 @@
  */
 
 #include "abti.h"
+#include <mach/mach_time.h>
 
 #if defined(HAVE_MACH_ABSOLUTE_TIME)
 static double g_time_mult = 0.0;

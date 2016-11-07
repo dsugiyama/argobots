@@ -93,7 +93,7 @@ static void sched_run(ABT_sched sched)
                 LOG_EVENT_POOL_POP(p_pool, unit);
                 if (unit != ABT_UNIT_NULL) {
                     // Change the pool which the unit belongs to.
-                    unit->pool = p_pools[0];
+                    ((ABTI_unit *) unit)->pool = p_pools[0];
                     ABTI_xstream_run_unit(p_xstream, unit, p_pool);
                 }
             }

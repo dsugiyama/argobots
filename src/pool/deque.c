@@ -24,7 +24,7 @@ static int deque_init(ABT_pool pool, ABT_pool_config config)
     ABTI_UNUSED(config);
     int abt_errno = ABT_SUCCESS;
 
-    data_t *p_data = (data_t *)ABTU_malloc(sizeof(data_t));
+    data_t *p_data = ABTU_malloc(sizeof(data_t));
 
     p_data->unit_array = ABTU_malloc(INITIAL_LENGTH * sizeof(ABTI_unit *));
     p_data->array_length = INITIAL_LENGTH;

@@ -4,7 +4,6 @@
  */
 
 #include "abti.h"
-#include <mach/mach_time.h>
 
 #if defined(HAVE_MACH_ABSOLUTE_TIME)
 static double g_time_mult = 0.0;
@@ -12,6 +11,7 @@ static double g_time_mult = 0.0;
 void ABTD_time_init(void)
 {
 #if defined(HAVE_MACH_ABSOLUTE_TIME)
+# include <mach/mach_time.h>
     mach_timebase_info_data_t info;
     mach_timebase_info(&info);
     g_time_mult = 1.0e-9 * ((double)info.numer / (double)info.denom);

@@ -151,7 +151,8 @@ enum ABT_sched_type {
 };
 
 enum ABT_pool_kind {
-    ABT_POOL_FIFO
+    ABT_POOL_FIFO,
+    ABT_POOL_DEQUE
 };
 
 enum ABT_pool_access {

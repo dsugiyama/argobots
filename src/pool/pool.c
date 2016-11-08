@@ -85,6 +85,8 @@ int ABT_pool_create(ABT_pool_def *def, ABT_pool_config config,
     goto fn_exit;
 }
 
+extern ABT_pool_def ABTI_pool_deque;
+
 /**
  * @ingroup POOL
  * @brief   Create a new pool from a predefined type and return its handle
@@ -108,6 +110,10 @@ int ABT_pool_create_basic(ABT_pool_kind kind, ABT_pool_access access,
     switch (kind) {
         case ABT_POOL_FIFO:
             abt_errno = ABTI_pool_get_fifo_def(access, &def);
+            break;
+        case ABT_POOL_DEQUE:
+            ABTI_ASSERT(access == ABT_POOL_ACCESS_SPMC);
+            def = ABTI_pool_deque;
             break;
         default:
             abt_errno = ABT_ERR_INV_POOL_KIND;

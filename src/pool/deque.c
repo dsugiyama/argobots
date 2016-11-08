@@ -5,8 +5,6 @@
 // (https://referencesource.microsoft.com/#mscorlib/system/threading/threadpool.cs,c6809900d25746e6).
 
 typedef struct data {
-    // Pointer to array itself, array length and mask do not need to be _Atomic
-    // because they are modified only in between mutex_spinlock/unlock.
     ABTI_unit **unit_array;
     size_t array_length;
     size_t mask;
@@ -117,7 +115,7 @@ static ABT_unit deque_pop_local(ABTI_pool *self)
         }
 
         tail -= 1;
-        atomic_exchange(&m->tail_idx, tail);
+        __sync_lock_test_and_set(&m->tail_idx, tail);
 
         // If there is no interaction with a take, we can head down the fast path.
         if (m->head_idx <= tail) {
@@ -172,7 +170,7 @@ ABT_unit deque_pop_steal(ABTI_pool *self)
 
         // Increment head, and ensure read of tail doesn't move before it (fence).
         size_t head = m->head_idx;
-        atomic_exchange(&m->head_idx, head + 1);
+        __sync_lock_test_and_set(&m->head_idx, head + 1);
 
         if (head < m->tail_idx) {
             size_t idx = head & m->mask;

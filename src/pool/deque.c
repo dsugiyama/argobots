@@ -7,11 +7,11 @@
 typedef struct data {
     // Pointer to array itself, array length and mask do not need to be _Atomic
     // because they are modified only in between mutex_spinlock/unlock.
-    ABTI_unit *_Atomic *unit_array;
+    ABTI_unit **unit_array;
     size_t array_length;
     size_t mask;
-    size_t _Atomic head_idx;
-    size_t _Atomic tail_idx;
+    size_t head_idx;
+    size_t tail_idx;
     ABTI_mutex foreign_lock;
 } data_t;
 
@@ -86,7 +86,7 @@ static void deque_push(ABTI_pool *self, ABTI_unit *unit)
         // If there is still space (one left), just add the element.
         if (count >= m->mask) {
             // We're full; expand the queue by doubling its size.
-            ABTI_unit *_Atomic *new_array = ABTU_malloc((m->array_length << 1) * sizeof(ABTI_unit *));
+            ABTI_unit **new_array = ABTU_malloc((m->array_length << 1) * sizeof(ABTI_unit *));
             for (int i = 0; i < m->array_length; i++) {
                 new_array[i] = m->unit_array[(i + head) & m->mask];
             }

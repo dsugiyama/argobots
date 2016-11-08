@@ -5,5 +5,6 @@
 
 abt_sources += \
 	pool/fifo.c \
-	pool/pool.c
+	pool/pool.c \
+	pool/deque.c
 

@@ -85,7 +85,8 @@ static void deque_push(ABTI_pool *self, ABTI_unit *unit)
         // If there is still space (one left), just add the element.
         if (count >= m->mask) {
             // We're full; expand the queue by doubling its size.
-            ABTI_unit **new_array = ABTU_malloc((m->array_length << 1) * sizeof(ABTI_unit *));
+            size_t new_length = m->array_length << 1;
+            ABTI_unit **new_array = ABTU_malloc(new_length * sizeof(ABTI_unit *));
             for (int i = 0; i < m->array_length; i++) {
                 new_array[i] = m->unit_array[(i + head) & m->mask];
             }
@@ -93,6 +94,7 @@ static void deque_push(ABTI_pool *self, ABTI_unit *unit)
             // Reset the field values, incl. the mask.
             ABTU_free(m->unit_array);
             m->unit_array = new_array;
+            m->array_length = new_length;
             m->head_idx = 0;
             m->tail_idx = tail = count;
             m->mask = (m->mask << 1) | 1;

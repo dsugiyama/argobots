@@ -80,6 +80,9 @@ static void sched_run(ABT_sched sched)
             unit = p_pool->p_pop(pool);
             LOG_EVENT_POOL_POP(p_pool, unit);
             if (unit != ABT_UNIT_NULL) {
+                ABT_unit_type type = ((ABTI_unit *) unit)->type;
+                printf("unit type: %d\n", type);
+                if (type < 0 || type > 3) { printf("UNIT TYPE ERROR!\n"); }
                 ABTI_xstream_run_unit(p_xstream, unit, p_pool);
             }
         } else if (num_pools > 1) {

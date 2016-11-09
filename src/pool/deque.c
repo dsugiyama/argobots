@@ -42,6 +42,7 @@ static int deque_free(ABT_pool pool)
     data_t *p_data;
     ABT_pool_get_data(pool, &p_data);
 
+    ABTU_free(p_data->unit_array);
     ABTU_free(p_data);
 
     return abt_errno;
@@ -90,6 +91,7 @@ static void deque_push(ABTI_pool *self, ABTI_unit *unit)
             }
 
             // Reset the field values, incl. the mask.
+            ABTU_free(m->unit_array);
             m->unit_array = new_array;
             m->head_idx = 0;
             m->tail_idx = tail = count;

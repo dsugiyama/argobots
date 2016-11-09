@@ -101,7 +101,7 @@ static void deque_push(ABTI_pool *self, ABTI_unit *unit)
         }
 
         m->unit_array[tail & m->mask] = unit;
-        m->tail_idx + tail + 1;
+        m->tail_idx = tail + 1;
 
         ABTI_mutex_unlock(&m->foreign_lock);
     }

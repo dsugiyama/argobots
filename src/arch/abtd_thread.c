@@ -84,6 +84,7 @@ static inline void ABTD_thread_terminate(ABTI_thread *p_thread)
             /* If the current ULT's associated ES is different from p_joiner's,
              * we can't directly jump to p_joiner.  Instead, we wake up
              * p_joiner here so that p_joiner's scheduler can resume it. */
+            p_joiner->p_pool = ((ABTI_unit *) p_joiner->unit)->pool = p_thread->p_pool;
             ABTI_thread_set_ready(p_joiner);
 
             /* We don't need to use the atomic operation here because the ULT

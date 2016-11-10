@@ -100,6 +100,8 @@ static inline void ABTD_thread_terminate(ABTI_thread *p_thread)
             while ((volatile abt_ucontext_t *)p_fctx->p_link == NULL) {
                 ABTD_atomic_mem_barrier();
             }
+            ABTI_thread *p_joiner = (ABTI_thread *)p_fctx->p_link;
+            p_joiner->p_pool = ((ABTI_unit *) p_joiner->unit)->pool = p_thread->p_pool;
             ABTI_thread_set_ready((ABTI_thread *)p_fctx->p_link);
         }
     }

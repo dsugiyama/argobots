@@ -1,0 +1,45 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "C++ Launch",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceRoot}/../bots-icc/bin/uts.icc.omp-tasks",
+            "args": ["-f", "inputs/uts/test.input"],
+            "stopAtEntry": false,
+            "cwd": "${workspaceRoot}/../bots-icc",
+            "environment": [
+                { "name": "LD_LIBRARY_PATH", "value": "/Users/daisuke/inst/argobots/dbg/lib" },
+                { "name": "DYLD_LIBRARY_PATH", "value": "/opt/intel/compilers_and_libraries_2017.1.126/mac/compiler/lib:/opt/intel/compilers_and_libraries_2017.1.126/mac/compiler/lib/intel64" },
+                { "name": "ABT_NUM_ES", "value": "4" }
+            ],
+            "externalConsole": false,
+            "linux": {
+                "MIMode": "gdb"
+            },
+            "osx": {
+                "MIMode": "lldb"
+            },
+            "windows": {
+                "MIMode": "gdb"
+            }
+        },
+        {
+            "name": "C++ Attach",
+            "type": "cppdbg",
+            "request": "attach",
+            "program": "enter program name, for example ${workspaceRoot}/a.out",
+            "processId": "${command.pickProcess}",
+            "linux": {
+                "MIMode": "gdb"
+            },
+            "osx": {
+                "MIMode": "lldb"
+            },
+            "windows": {
+                "MIMode": "gdb"
+            }
+        }
+    ]
+}

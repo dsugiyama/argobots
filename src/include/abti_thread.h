@@ -63,8 +63,16 @@ void ABTI_thread_yield(ABTI_thread *p_thread)
     /* Change the state of current running thread */
     p_thread->state = ABT_THREAD_STATE_READY;
 
-    /* Switch to the top scheduler */
-    p_sched = ABTI_xstream_get_top_sched(p_thread->p_last_xstream);
+    /* Change the state of current scheduler if the ULT is a scheduler */
+    if (p_thread->is_sched != NULL) {
+        p_thread->is_sched->state = ABT_SCHED_STATE_READY;
+    }
+    
+    p_sched = p_thread->is_sched == NULL
+        /* Switch to the top scheduler */
+        ? ABTI_xstream_get_top_sched(p_thread->p_last_xstream)
+        /* Switch to the parent scheduler */
+        : ABTI_xstream_get_parent_sched(p_thread->p_last_xstream);
     ABTI_LOG_SET_SCHED(p_sched);
     ABTD_thread_context_switch(&p_thread->ctx, p_sched->p_ctx);
 

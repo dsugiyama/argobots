@@ -62,6 +62,7 @@ static void sched_run(ABT_sched sched)
     ABT_unit unit;
     int target;
     unsigned seed = time(NULL);
+    int pool_last_stolen = -1;
 
     ABTI_xstream *p_xstream = ABTI_local_get_xstream();
     ABTI_sched *p_sched = ABTI_sched_get_ptr(sched);
@@ -83,8 +84,13 @@ static void sched_run(ABT_sched sched)
                 ABTI_xstream_run_unit(p_xstream, unit, p_pool);
             }
         } else if (num_pools > 1) {
+            unit = ABT_UNIT_NULL;
             /* Steal a work unit from other pools */
-            target = (num_pools == 2) ? 1 : (rand_r(&seed) % (num_pools-1) + 1);
+            target = pool_last_stolen;
+            // If no recent successful stealing, select a random pool.
+            if (target == -1) {
+                target = (num_pools == 2) ? 1 : (rand_r(&seed) % (num_pools-1) + 1);
+            }
             pool = p_pools[target];
             p_pool = ABTI_pool_get_ptr(pool);
             size = p_pool->p_get_size(pool);
@@ -92,10 +98,14 @@ static void sched_run(ABT_sched sched)
                 unit = deque_pop_steal(p_pool);
                 LOG_EVENT_POOL_POP(p_pool, unit);
                 if (unit != ABT_UNIT_NULL) {
+                    pool_last_stolen = target;
                     // Change the pool which the unit belongs to.
                     ((ABTI_unit *) unit)->pool = ((ABTI_thread *) ((ABTI_unit *) unit)->thread)->p_pool = p_pools[0];
                     ABTI_xstream_run_unit(p_xstream, unit, p_pool);
                 }
+            }
+            if (unit == ABT_UNIT_NULL) {
+                pool_last_stolen = -1;
             }
         }
 

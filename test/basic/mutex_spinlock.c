@@ -37,9 +37,10 @@ void thread_func(void *arg)
 
     ABT_test_printf(1, "[U%d:E%d] START\n", t_arg->id, rank);
     for (i = 0; i < g_iter; i++) {
-        ABT_mutex_lock(t_arg->mutex);
+        ABT_mutex_spinlock(t_arg->mutex);
         g_counter++;
         ABT_mutex_unlock(t_arg->mutex);
+        ABT_thread_yield();
     }
     ABT_test_printf(1, "[U%d:E%d] END\n", t_arg->id, rank);
 

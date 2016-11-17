@@ -101,6 +101,8 @@ typedef enum ABTI_thread_type       ABTI_thread_type;
 typedef struct ABTI_thread_req_arg  ABTI_thread_req_arg;
 typedef struct ABTI_thread_list     ABTI_thread_list;
 typedef struct ABTI_thread_entry    ABTI_thread_entry;
+typedef struct ABTI_thread_htable   ABTI_thread_htable;
+typedef struct ABTI_thread_queue    ABTI_thread_queue;
 typedef struct ABTI_task            ABTI_task;
 typedef struct ABTI_key             ABTI_key;
 typedef struct ABTI_ktelem          ABTI_ktelem;
@@ -124,23 +126,33 @@ typedef struct ABTI_sp_header       ABTI_sp_header;
 #include "abtd.h"
 
 
+/* Spinlock */
+typedef struct ABTI_spinlock        ABTI_spinlock;
+#include "abti_spinlock.h"
+
+
 /* Definitions */
 struct ABTI_mutex_attr {
     uint32_t attrs;             /* bit-or'ed attributes */
     uint32_t nesting_cnt;       /* nesting count */
     ABTI_unit *p_owner;         /* owner work unit */
+    uint32_t max_handovers;     /* max. # of handovers */
+    uint32_t max_wakeups;       /* max. # of wakeups */
 };
 
 struct ABTI_mutex {
-    uint32_t val;               /* 0: unlocked, 1: locked */
-    ABTI_mutex_attr attr;       /* attributes */
+    uint32_t val;                   /* 0: unlocked, 1: locked */
+    ABTI_mutex_attr attr;           /* attributes */
+    ABTI_thread_htable *p_htable;   /* a set of queues */
+    ABTI_thread *p_handover;        /* next ULT for the mutex handover */
+    ABTI_thread *p_giver;           /* current ULT that hands over the mutex */
 };
 
 struct ABTI_global {
     int max_xstreams;           /* Max. size of p_xstreams */
     int num_xstreams;           /* Current # of ESs */
     ABTI_xstream **p_xstreams;  /* ES array */
-    ABTI_mutex mutex;           /* Mutex */
+    ABTI_spinlock lock;         /* Spinlock */
 
     int num_cores;              /* Number of CPU cores */
     ABT_bool set_affinity;      /* Whether CPU affinity is used */
@@ -150,7 +162,11 @@ struct ABTI_global {
     size_t thread_stacksize;    /* Default stack size for ULT (in bytes) */
     size_t sched_stacksize;     /* Default stack size for sched (in bytes) */
     uint32_t sched_event_freq;  /* Default check frequency for sched */
+    long sched_sleep_nsec;      /* Default nanoseconds for scheduler sleep */
     ABTI_thread *p_thread_main; /* ULT of the main function */
+
+    uint32_t mutex_max_handovers;      /* Default max. # of local handovers */
+    uint32_t mutex_max_wakeups;        /* Default max. # of wakeups */
 
     uint32_t cache_line_size;          /* Cache line size */
     uint32_t os_page_size;             /* OS page size */
@@ -213,11 +229,10 @@ struct ABTI_xstream {
     ABTI_sched **scheds;        /* Stack of running schedulers */
     int max_scheds;             /* Allocation size of the array scheds */
     int num_scheds;             /* Number of scheds */
-    ABTI_mutex top_sched_mutex; /* Mutex for the top scheduler */
+    ABTI_spinlock sched_lock;   /* Lock for the scheduler management */
 
     uint32_t request;           /* Request */
     void *p_req_arg;            /* Request argument */
-    ABTI_mutex mutex;           /* Mutex */
     ABTI_sched *p_main_sched;   /* Main scheduler */
 
     ABTD_xstream_context ctx;   /* ES context */
@@ -325,7 +340,7 @@ struct ABTI_thread {
     uint32_t refcount;              /* Reference count */
     ABTI_thread_type type;          /* Type */
     ABTI_thread_req_arg *p_req_arg; /* Request argument */
-    ABTI_mutex mutex;               /* Mutex */
+    ABTI_spinlock lock;             /* Spinlock */
     ABTI_ktable *p_keytable;        /* ULT-specific data */
     ABTI_thread_attr attr;          /* Attributes */
     ABT_thread_id id;               /* ID */
@@ -388,7 +403,7 @@ struct ABTI_ktable {
 };
 
 struct ABTI_cond {
-    ABTI_mutex mutex;
+    ABTI_spinlock lock;
     ABTI_mutex *p_waiter_mutex;
     size_t num_waiters;
     ABTI_unit *p_head;          /* Head of waiters */
@@ -403,7 +418,7 @@ struct ABTI_rwlock {
 };
 
 struct ABTI_eventual {
-    ABTI_mutex mutex;
+    ABTI_spinlock lock;
     ABT_bool ready;
     void *value;
     int nbytes;
@@ -412,7 +427,7 @@ struct ABTI_eventual {
 };
 
 struct ABTI_future {
-    ABTI_mutex mutex;
+    ABTI_spinlock lock;
     ABT_bool ready;
     uint32_t counter;
     uint32_t compartments;
@@ -427,7 +442,7 @@ struct ABTI_barrier {
     volatile uint32_t counter;
     ABTI_thread **waiters;
     ABT_unit_type *waiter_type;
-    ABTI_mutex mutex;
+    ABTI_spinlock lock;
 };
 
 struct ABTI_timer {
@@ -545,11 +560,33 @@ void  ABTI_thread_retain(ABTI_thread *p_thread);
 void  ABTI_thread_release(ABTI_thread *p_thread);
 void  ABTI_thread_reset_id(void);
 ABT_thread_id ABTI_thread_get_id(ABTI_thread *p_thread);
+ABT_thread_id ABTI_thread_self_id(void);
+int ABTI_thread_get_xstream_rank(ABTI_thread *p_thread);
+int ABTI_thread_self_xstream_rank(void);
 
 /* ULT Attributes */
 void ABTI_thread_attr_print(ABTI_thread_attr *p_attr, FILE *p_os, int indent);
 void ABTI_thread_attr_get_str(ABTI_thread_attr *p_attr, char *p_buf);
 ABTI_thread_attr *ABTI_thread_attr_dup(ABTI_thread_attr *p_attr);
+
+/* ULT hash table */
+ABTI_thread_htable *ABTI_thread_htable_create(uint32_t num_rows);
+void ABTI_thread_htable_free(ABTI_thread_htable *p_htable);
+void ABTI_thread_htable_push(ABTI_thread_htable *p_htable, int idx,
+                             ABTI_thread *p_thread);
+ABT_bool ABTI_thread_htable_add(ABTI_thread_htable *p_htable, int idx,
+                                ABTI_thread *p_thread);
+void ABTI_thread_htable_push_low(ABTI_thread_htable *p_htable, int idx,
+                             ABTI_thread *p_thread);
+ABT_bool ABTI_thread_htable_add_low(ABTI_thread_htable *p_htable, int idx,
+                                    ABTI_thread *p_thread);
+ABTI_thread *ABTI_thread_htable_pop(ABTI_thread_htable *p_htable,
+                                    ABTI_thread_queue *p_queue);
+ABTI_thread *ABTI_thread_htable_pop_low(ABTI_thread_htable *p_htable,
+                                        ABTI_thread_queue *p_queue);
+ABT_bool ABTI_thread_htable_switch_low(ABTI_thread_queue *p_queue,
+                                       ABTI_thread *p_thread,
+                                       ABTI_thread_htable *p_htable);
 
 /* Tasklet */
 int ABTI_task_create_sched(ABTI_pool *p_pool, ABTI_sched *p_sched);
@@ -563,6 +600,12 @@ uint64_t ABTI_task_get_id(ABTI_task *p_task);
 /* Key */
 ABTI_ktable *ABTI_ktable_alloc(int size);
 void ABTI_ktable_free(ABTI_ktable *p_ktable);
+
+/* Mutex */
+void ABTI_mutex_wait(ABTI_mutex *p_mutex, int val);
+void ABTI_mutex_wait_low(ABTI_mutex *p_mutex, int val);
+void ABTI_mutex_wake_se(ABTI_mutex *p_mutex, int num);
+void ABTI_mutex_wake_de(ABTI_mutex *p_mutex);
 
 /* Mutex Attributes */
 void ABTI_mutex_attr_print(ABTI_mutex_attr *p_attr, FILE *p_os, int indent);
@@ -585,9 +628,9 @@ void ABTI_event_publish_info(void);
 #include "abti_event.h"
 #include "abti_local.h"
 #include "abti_global.h"
+#include "abti_pool.h"
 #include "abti_sched.h"
 #include "abti_config.h"
-#include "abti_pool.h"
 #include "abti_stream.h"
 #include "abti_self.h"
 #include "abti_thread.h"

@@ -88,9 +88,8 @@ int ABTI_xstream_create(ABTI_sched *p_sched, ABTI_xstream **pp_xstream)
     p_newxstream->p_req_arg    = NULL;
     p_newxstream->p_main_sched = NULL;
 
-    /* Create mutex */
-    ABTI_mutex_init(&p_newxstream->mutex);
-    ABTI_mutex_init(&p_newxstream->top_sched_mutex);
+    /* Create the spinlock */
+    ABTI_spinlock_create(&p_newxstream->sched_lock);
 
     /* Set the main scheduler */
     abt_errno = ABTI_xstream_set_main_sched(p_newxstream, p_sched);
@@ -229,9 +228,8 @@ int ABT_xstream_create_with_rank(ABT_sched sched, int rank,
     p_newxstream->p_req_arg    = NULL;
     p_newxstream->p_main_sched = NULL;
 
-    /* Create mutex */
-    ABTI_mutex_init(&p_newxstream->mutex);
-    ABTI_mutex_init(&p_newxstream->top_sched_mutex);
+    /* Create the spinlock */
+    ABTI_spinlock_create(&p_newxstream->sched_lock);
 
     /* Set the main scheduler */
     abt_errno = ABTI_xstream_set_main_sched(p_newxstream, p_sched);
@@ -464,16 +462,13 @@ int ABT_xstream_join(ABT_xstream xstream)
                         "The primary ES cannot be joined.");
 
     if (p_xstream->state == ABT_XSTREAM_STATE_CREATED) {
-        ABTI_mutex_spinlock(&p_xstream->mutex);
         /* If xstream's state was changed, we cannot terminate it here */
         if (ABTD_atomic_cas_int32((int32_t *)&p_xstream->state,
                                   ABT_XSTREAM_STATE_CREATED,
                                   ABT_XSTREAM_STATE_TERMINATED)
             != ABT_XSTREAM_STATE_CREATED) {
-            ABTI_mutex_unlock(&p_xstream->mutex);
             goto fn_body;
         }
-        ABTI_mutex_unlock(&p_xstream->mutex);
         goto fn_exit;
     }
 
@@ -1347,6 +1342,9 @@ int ABTI_xstream_free(ABTI_xstream *p_xstream)
     /* Return rank for reuse */
     ABTI_xstream_return_rank(p_xstream->rank);
 
+    /* Free the spinlock */
+    ABTI_spinlock_free(&p_xstream->sched_lock);
+
     ABTU_free(p_xstream);
 
   fn_exit:
@@ -1375,7 +1373,7 @@ void ABTI_xstream_schedule(void *p_arg)
         p_sched->state = ABT_SCHED_STATE_TERMINATED;
 
         p_xstream->state = ABT_XSTREAM_STATE_READY;
-        ABTI_mutex_unlock(&p_xstream->top_sched_mutex);
+        ABTI_spinlock_release(&p_xstream->sched_lock);
 
 #ifdef ABT_CONFIG_HANDLE_POWER_EVENT
         /* If there is a stop request, the ES has to be terminated/ */
@@ -1476,7 +1474,7 @@ int ABTI_xstream_schedule_thread(ABTI_xstream *p_xstream, ABTI_thread *p_thread)
         /* If a migration is trying to read the state of the scheduler, we need
          * to let it finish before freeing the scheduler */
         p_thread->is_sched->state = ABT_SCHED_STATE_STOPPED;
-        ABTI_mutex_unlock(&p_xstream->top_sched_mutex);
+        ABTI_spinlock_release(&p_xstream->sched_lock);
     }
 #endif
 
@@ -1600,7 +1598,7 @@ void ABTI_xstream_schedule_task(ABTI_xstream *p_xstream, ABTI_task *p_task)
         ABTI_xstream_pop_sched(p_xstream);
         /* If a migration is trying to read the state of the scheduler, we need
          * to let it finish before freeing the scheduler */
-        ABTI_mutex_unlock(&p_xstream->top_sched_mutex);
+        ABTI_spinlock_release(&p_xstream->sched_lock);
         ABTI_LOG_SET_SCHED(ABTI_xstream_get_top_sched(p_xstream));
         LOG_EVENT("[S%" PRIu64 ":E%" PRIu64 "] stacked sched end\n",
                   p_task->is_sched->id, p_xstream->rank);
@@ -1637,7 +1635,7 @@ int ABTI_xstream_migrate_thread(ABTI_thread *p_thread)
         p_thread->attr.f_cb(thread, p_thread->attr.p_cb_arg);
     }
 
-    ABTI_mutex_spinlock(&p_thread->mutex); // TODO: mutex useful?
+    ABTI_spinlock_acquire(&p_thread->lock); // TODO: mutex useful?
     {
         /* extracting argument in migration request */
         p_pool = (ABTI_pool *)ABTI_thread_extract_req_arg(p_thread,
@@ -1658,7 +1656,7 @@ int ABTI_xstream_migrate_thread(ABTI_thread *p_thread)
         /* Add the unit to the scheduler's pool */
         abt_errno = ABT_pool_push(pool, p_thread->unit);
     }
-    ABTI_mutex_unlock(&p_thread->mutex);
+    ABTI_spinlock_release(&p_thread->lock);
 
     ABTI_pool_dec_num_migrations(p_pool);
 
@@ -1933,7 +1931,7 @@ static uint64_t ABTI_xstream_get_new_rank(void)
     int max_xstreams;
 
     if (gp_ABTI_global->num_xstreams >= gp_ABTI_global->max_xstreams) {
-        ABTI_mutex_spinlock(&gp_ABTI_global->mutex);
+        ABTI_spinlock_acquire(&gp_ABTI_global->lock);
         if (gp_ABTI_global->num_xstreams >= gp_ABTI_global->max_xstreams) {
             max_xstreams = gp_ABTI_global->max_xstreams * 2;
             gp_ABTI_global->p_xstreams = (ABTI_xstream **)ABTU_realloc(
@@ -1946,7 +1944,7 @@ static uint64_t ABTI_xstream_get_new_rank(void)
             }
             gp_ABTI_global->max_xstreams = max_xstreams;
         }
-        ABTI_mutex_unlock(&gp_ABTI_global->mutex);
+        ABTI_spinlock_release(&gp_ABTI_global->lock);
     }
 
     for (i = 0; i < gp_ABTI_global->max_xstreams; i++) {

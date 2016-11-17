@@ -1,6 +1,5 @@
 //------------------------------------------------------------------------------
-// (C) 2016 by Argonne National Laboratory.
-//    See COPYRIGHT in top-level directory.
+// See COPYRIGHT in top-level directory.
 //------------------------------------------------------------------------------
 
 /* ES Affinity */
@@ -76,6 +75,27 @@ ABT_SCHED_EVENT_FREQ
     Description: Set the default event checking frequency for the scheduler.
     Values: unsigned integer
     Default: 50
+
+ABT_SCHED_SLEEP_NSEC
+    Aliases: ABT_ENV_SCHED_SLEEP_NSEC
+    Description: Set the default nanosleep value when making the scheduler
+                 sleep.
+    Values: long
+    Default: 100
+
+ABT_MUTEX_MAX_HANDOVERS
+    Aliases: ABT_ENV_MUTEX_MAX_HANDOVERS
+    Description: Set the maximum number of mutex handovers within an ES before
+                 giving up the mutex.
+    Values: unsigned integer
+    Default: 64
+
+ABT_MUTEX_MAX_WAKEUPS
+    Aliases: ABT_ENV_MUTEX_MAX_WAKEUPS
+    Description: Set the maximum number of ULTs to wake up at once in
+                 ABT_mutex_unlock() or ABT_mutex_unlock_de().
+    Values: unsigned integer
+    Default: 1
 
 ABT_CACHE_LINE_SIZE
     Aliases: ABT_ENV_CACHE_LINE_SIZE

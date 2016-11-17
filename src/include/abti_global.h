@@ -27,9 +27,27 @@ size_t ABTI_global_get_sched_event_freq(void)
 }
 
 static inline
+long ABTI_global_get_sched_sleep_nsec(void)
+{
+    return gp_ABTI_global->sched_sleep_nsec;
+}
+
+static inline
 ABTI_thread *ABTI_global_get_main(void)
 {
     return gp_ABTI_global->p_thread_main;
+}
+
+static inline
+uint32_t ABTI_global_get_mutex_max_handovers(void)
+{
+    return gp_ABTI_global->mutex_max_handovers;
+}
+
+static inline
+uint32_t ABTI_global_get_mutex_max_wakeups(void)
+{
+    return gp_ABTI_global->mutex_max_wakeups;
 }
 
 #endif /* GLOBAL_H_INCLUDED */

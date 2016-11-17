@@ -175,6 +175,32 @@ uint64_t ABTD_atomic_fetch_xor_uint64(uint64_t *ptr, uint64_t v)
     return __sync_fetch_and_xor(ptr, v);
 }
 
+#ifdef ABT_CONFIG_HAVE_ATOMIC_EXCHANGE
+static inline
+int32_t ABTD_atomic_exchange_int32(int32_t *ptr, int32_t v)
+{
+    return __atomic_exchange_n(ptr, v, __ATOMIC_SEQ_CST);
+}
+
+static inline
+uint32_t ABTD_atomic_exchange_uint32(uint32_t *ptr, uint32_t v)
+{
+    return __atomic_exchange_n(ptr, v, __ATOMIC_SEQ_CST);
+}
+
+static inline
+int64_t ABTD_atomic_exchange_int64(int64_t *ptr, int64_t v)
+{
+    return __atomic_exchange_n(ptr, v, __ATOMIC_SEQ_CST);
+}
+
+static inline
+uint64_t ABTD_atomic_exchange_uint64(uint64_t *ptr, uint64_t v)
+{
+    return __atomic_exchange_n(ptr, v, __ATOMIC_SEQ_CST);
+}
+#endif
+
 static inline
 void ABTD_atomic_mem_barrier(void)
 {
@@ -185,6 +211,12 @@ static inline
 void ABTD_compiler_barrier(void)
 {
     __asm__ __volatile__ ( "" ::: "memory" );
+}
+
+static inline
+void ABTD_atomic_pause(void)
+{
+    __asm__ __volatile__ ( "pause" ::: "memory" );
 }
 
 #endif /* ABTD_ATOMIC_H_INCLUDED */

@@ -72,10 +72,20 @@ dnl ----------------------------------------------------------------------------
 : ${CCASFLAGS=""}
 dnl ----------------------------------------------------------------------------
 
+dnl ----------------------------------------------------------------------------
+dnl check the compiler and standard headers
+dnl ----------------------------------------------------------------------------
+PAC_PROG_CC
+AC_HEADER_STDC
+dnl ----------------------------------------------------------------------------
 
 dnl ----------------------------------------------------------------------------
 dnl configure options
 dnl ----------------------------------------------------------------------------
+# --enable-visibility
+PAC_CHECK_VISIBILITY
+AC_SUBST(ABT_VISIBILITY_CFLAGS)
+
 # --enable-affinity
 AC_ARG_ENABLE([affinity],
     AS_HELP_STRING([--enable-affinity],
@@ -175,6 +185,19 @@ AC_ARG_ENABLE([feature],
         none|no             - disable all features above
 ],,[enable_feature=all])
 
+# --enable-sched-sleep
+AC_ARG_ENABLE([sched-sleep],
+    AS_HELP_STRING([--enable-sched-sleep], [enable scheduler sleep]))
+
+# --enable-simple-mutex
+AC_ARG_ENABLE([simple-mutex],
+    AS_HELP_STRING([--enable-simple-mutex], [use a simple mutex implementation]))
+
+# --with-lts
+AC_ARG_WITH([lts],
+    AS_HELP_STRING([--with-lts=PATH],
+        [specify path where lts include directory and lib directory can be found]))
+
 # --with-hugetlbfs
 AC_ARG_WITH([hugetlbfs],
     AS_HELP_STRING([--with-hugetlbfs=PATH],
@@ -199,14 +222,6 @@ AC_ARG_WITH([beacon],
 AC_ARG_WITH([intercoolr],
     AS_HELP_STRING([--with-intercoolr=PATH],
         [specify path where intercoolr include directory and lib directory can be found]))
-dnl ----------------------------------------------------------------------------
-
-
-dnl ----------------------------------------------------------------------------
-dnl check the compiler and standard headers
-dnl ----------------------------------------------------------------------------
-PAC_PROG_CC
-AC_HEADER_STDC
 dnl ----------------------------------------------------------------------------
 
 
@@ -533,12 +548,49 @@ AM_CONDITIONAL([ABT_CONFIG_DISABLE_EXT_THREAD],
     [test "x$enable_ext_thread" = "xno"])
 
 
+# --enable-sched-sleep
+AS_IF([test "x$enable_sched_sleep" = "xyes"],
+      [AC_DEFINE(ABT_CONFIG_USE_SCHED_SLEEP, 1,
+                 [Define to make the scheduler sleep when its pools are empty])])
+
+
+# check if __atomic_exchange_n() is supported
+AC_TRY_COMPILE(
+[#include <stdint.h>],
+[uint32_t val = 0;
+ uint32_t old = __atomic_exchange_n(&val, 2, __ATOMIC_SEQ_CST);],
+[have_atomic_exchange=yes],
+[have_atomic_exchange=no]
+)
+if test "x$have_atomic_exchange" = "xyes" ; then
+    AC_DEFINE(ABT_CONFIG_HAVE_ATOMIC_EXCHANGE, 1,
+              [Define if __atomic_exchange_n is supported])
+else
+    # If __atomic_exchange_n is not supported, we have to use the simple mutex
+    # implementation.
+    enable_simple_mutex=yes
+fi
+
+# --enable-simple-mutex
+AS_IF([test "x$enable_simple_mutex" = "xyes"],
+      [AC_DEFINE(ABT_CONFIG_USE_SIMPLE_MUTEX, 1,
+                 [Define to use a simple mutex implementation])])
+
+
+# --with-lts
+if test "x$with_lts" != "x"; then
+    PAC_PREPEND_FLAG([-I${with_lts}/include], [CFLAGS])
+    PAC_PREPEND_FLAG([-Wl,-rpath,${with_lts}/lib -L${with_lts}/lib -lthsync], [LDFLAGS])
+    AC_CHECK_HEADERS(lh_lock.h clh.h)
+fi
+
+
 # --with-hugetlbfs
 if test "x$with_hugetlbfs" != "x"; then
     PAC_PREPEND_FLAG([-I${with_hugetlbfs}/include], [CFLAGS])
     PAC_PREPEND_FLAG([-L${with_hugetlbfs}/lib64 -lhugetlbfs], [LDFLAGS])
+    AC_CHECK_LIB(hugetlbfs, get_huge_pages)
 fi
-AC_CHECK_LIB(hugetlbfs, get_huge_pages)
 
 
 # --enable-power-event: power management events from outside
@@ -645,7 +697,6 @@ AC_TRY_COMPILE([
 [AC_DEFINE(HAVE_MAP_HUGETLB, 1, [Define if MAP_HUGETLB is supported])],,)
 fi
 dnl ----------------------------------------------------------------------------
-
 
 AM_INIT_AUTOMAKE([-Wall -Wno-portability-recursive -Werror foreign 1.12.3 subdir-objects])
 AM_SILENT_RULES([yes])

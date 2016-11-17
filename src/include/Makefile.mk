@@ -30,11 +30,13 @@ noinst_HEADERS = \
 	include/abti_pool.h \
 	include/abti_sched.h \
 	include/abti_self.h \
+	include/abti_spinlock.h \
 	include/abti_stream.h \
 	include/abti_task.h \
 	include/abti_timer.h \
 	include/abti_thread.h \
 	include/abti_thread_attr.h \
+	include/abti_thread_htable.h \
 	include/abti_valgrind.h \
 	include/abtu.h
 

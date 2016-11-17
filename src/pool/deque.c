@@ -10,7 +10,7 @@ typedef struct data {
     size_t mask;
     size_t head_idx;
     size_t tail_idx;
-    ABTI_mutex foreign_lock;
+    ABTI_spinlock foreign_lock;
 } data_t;
 
 static size_t const INITIAL_LENGTH = 256;
@@ -29,7 +29,7 @@ static int deque_init(ABT_pool pool, ABT_pool_config config)
     p_data->mask = INITIAL_LENGTH - 1;
     p_data->head_idx = 0;
     p_data->tail_idx = 0;
-    ABTI_mutex_init(&p_data->foreign_lock);
+    ABTI_spinlock_create(&p_data->foreign_lock);
 
     ABT_pool_set_data(pool, p_data);
 
@@ -43,6 +43,7 @@ static int deque_free(ABT_pool pool)
     ABT_pool_get_data(pool, &p_data);
 
     ABTU_free(p_data->unit_array);
+    ABTI_spinlock_free(&p_data->foreign_lock);
     ABTU_free(p_data);
 
     return abt_errno;
@@ -63,12 +64,12 @@ static void deque_push(ABTI_pool *self, ABTI_unit *unit)
 
     // We're going to increment the tail; if we'll overflow, then we need to reset our counts.
     if (tail == SIZE_MAX) {
-        ABTI_mutex_spinlock(&m->foreign_lock);
+        ABTI_spinlock_acquire(&m->foreign_lock);
         if (m->tail_idx == SIZE_MAX) {
             m->head_idx = m->head_idx & m->mask;
             m->tail_idx = tail = m->tail_idx & m->mask;
         }
-        ABTI_mutex_unlock(&m->foreign_lock);
+        ABTI_spinlock_release(&m->foreign_lock);
     }
 
     // When there are at least 2 elements' worth of space, we can take the fast path.
@@ -77,7 +78,7 @@ static void deque_push(ABTI_pool *self, ABTI_unit *unit)
         m->tail_idx = tail + 1;
     } else {
         // We need to contend with foreign pops, so we lock.
-        ABTI_mutex_spinlock(&m->foreign_lock);
+        ABTI_spinlock_acquire(&m->foreign_lock);
 
         size_t head = m->head_idx;
         size_t count = m->tail_idx - m->head_idx;
@@ -103,7 +104,7 @@ static void deque_push(ABTI_pool *self, ABTI_unit *unit)
         m->unit_array[tail & m->mask] = unit;
         m->tail_idx = tail + 1;
 
-        ABTI_mutex_unlock(&m->foreign_lock);
+        ABTI_spinlock_release(&m->foreign_lock);
     }
 }
 
@@ -135,7 +136,7 @@ static ABT_unit deque_pop_local(ABTI_pool *self)
             return unit;
         } else {
             // Interaction with takes: 0 or 1 elements left.
-            ABTI_mutex_spinlock(&m->foreign_lock);
+            ABTI_spinlock_acquire(&m->foreign_lock);
 
             if (m->head_idx <= tail) {
                 // Element still available. Take it.
@@ -148,12 +149,12 @@ static ABT_unit deque_pop_local(ABTI_pool *self)
                 }
 
                 m->unit_array[idx] = ABT_UNIT_NULL;
-                ABTI_mutex_unlock(&m->foreign_lock);
+                ABTI_spinlock_release(&m->foreign_lock);
                 return unit;
             } else {
                 // Element was stolen, restore the tail.
                 m->tail_idx = tail + 1;
-                ABTI_mutex_unlock(&m->foreign_lock);
+                ABTI_spinlock_release(&m->foreign_lock);
                 return ABT_UNIT_NULL;
             }
         }
@@ -170,7 +171,7 @@ ABT_unit deque_pop_steal(ABTI_pool *self)
             return ABT_UNIT_NULL;
         }
 
-        ABTI_mutex_spinlock(&m->foreign_lock);
+        ABTI_spinlock_acquire(&m->foreign_lock);
 
         // Increment head, and ensure read of tail doesn't move before it (fence).
         size_t head = m->head_idx;
@@ -186,12 +187,12 @@ ABT_unit deque_pop_steal(ABTI_pool *self)
             }
 
             m->unit_array[idx] = ABT_UNIT_NULL;
-            ABTI_mutex_unlock(&m->foreign_lock);
+            ABTI_spinlock_release(&m->foreign_lock);
             return unit;
         } else {
             // Failed, restore head.
             m->head_idx = head;
-            ABTI_mutex_unlock(&m->foreign_lock);
+            ABTI_spinlock_release(&m->foreign_lock);
             return ABT_UNIT_NULL;
         }
     }
@@ -213,10 +214,10 @@ static int deque_remove(ABTI_pool *self, ABTI_unit *unit)
     for (size_t i = m->tail_idx - 2; i >= m->head_idx; i--) {
         if (m->unit_array[i & m->mask] == unit) {
             // If we found the element, block out steals to avoid interference.
-            ABTI_mutex_spinlock(&m->foreign_lock);
+            ABTI_spinlock_acquire(&m->foreign_lock);
 
             if (m->unit_array[i & m->mask] == ABT_UNIT_NULL) {
-                ABTI_mutex_unlock(&m->foreign_lock);
+                ABTI_spinlock_release(&m->foreign_lock);
                 return ABT_ERR_POOL;
             }
 
@@ -232,7 +233,7 @@ static int deque_remove(ABTI_pool *self, ABTI_unit *unit)
                 m->head_idx += 1;
             }
 
-            ABTI_mutex_unlock(&m->foreign_lock);
+            ABTI_spinlock_release(&m->foreign_lock);
             return ABT_SUCCESS;
         }
     }

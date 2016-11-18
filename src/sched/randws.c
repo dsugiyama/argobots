@@ -108,7 +108,7 @@ static void sched_run(ABT_sched sched)
             LOG_EVENT_POOL_POP(p_pool, unit);
             if (unit != ABT_UNIT_NULL) {
                 pool_last_stolen = target;
-                ABT_unit_set_associated_pool(unit, pool);
+                ABT_unit_set_associated_pool(unit, p_pools[0]);
                 ABTI_xstream_run_unit(p_xstream, unit, p_pool);
                 CNT_INC(run_cnt);
             }

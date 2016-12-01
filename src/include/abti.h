@@ -130,6 +130,10 @@ typedef struct ABTI_sp_header       ABTI_sp_header;
 typedef struct ABTI_spinlock        ABTI_spinlock;
 #include "abti_spinlock.h"
 
+/* Ticket lock */
+typedef struct ABTI_ticket_lock        ABTI_ticket_lock;
+#include "abti_ticket_lock.h"
+
 
 /* Definitions */
 struct ABTI_mutex_attr {

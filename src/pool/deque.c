@@ -25,6 +25,11 @@ static int deque_init(ABT_pool pool, ABT_pool_config config)
     data_t *p_data = ABTU_malloc(sizeof(data_t));
 
     p_data->unit_array = ABTU_malloc(INITIAL_LENGTH * sizeof(ABTI_unit *));
+#ifdef ABT_CONFIG_USE_DEBUG_LOG
+    for (int i = 0; i < INITIAL_LENGTH; i++) {
+        p_data->unit_array[i] = (1ULL << 63) + i;
+    }
+#endif
     p_data->array_length = INITIAL_LENGTH;
     p_data->mask = INITIAL_LENGTH - 1;
     p_data->head_idx = 0;

@@ -1,3 +1,26 @@
+# ビルド方法
+```sh
+./autogen.sh
+# if [ 'LIBTOOL' is undefined と言われた ]; then
+libtoolize
+aclocal
+autoheader
+./autogen.sh
+# fi
+
+# if [ KNL 向けにクロスコンパイルする ]; then
+./configure --prefix=path/to/install --enable-affinity \
+            --host=x86_64-unknown-linux-gnu \
+            CC=icc CFLAGS="-std=gnu99 -O3 -ipo -xMIC-AVX512" LD=xild AR=xiar
+# else
+./configure --prefix=path/to/install --enable-affinity \
+            CC=icc CFLAGS="-std=gnu99 -O3 -ipo" LD=xild AR=xiar
+# fi
+make && make install
+```
+
+-------------------------------------------------------------------------
+
 			Argobots Release %VERSION%
 
 Argobots is a lightweight, low-level threading and tasking framework.
